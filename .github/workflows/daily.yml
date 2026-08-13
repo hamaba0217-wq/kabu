@@ -1,0 +1,39 @@
+name: 日次スクリーニング
+
+on:
+  schedule:
+    # 平日 17:30 JST（= 08:30 UTC）
+    - cron: "30 8 * * 1-5"
+  workflow_dispatch:        # 手動実行ボタン
+
+permissions:
+  contents: write           # 抽出履歴をリポジトリに保存するため
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: スクリーニング実行とメール送信
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          MAIL_FROM:       ${{ secrets.MAIL_FROM }}
+          MAIL_PASSWORD:   ${{ secrets.MAIL_PASSWORD }}
+          MAIL_TO:         ${{ secrets.MAIL_TO }}
+        run: python main.py daily-mail
+
+      - name: 抽出履歴をコミット
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add history/ || true
+          git diff --staged --quiet || git commit -m "履歴を追加 $(date +%F)"
+          git push || true

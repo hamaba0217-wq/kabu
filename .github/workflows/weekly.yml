@@ -1,0 +1,28 @@
+name: 週次レポート
+
+on:
+  schedule:
+    # 毎週土曜 08:00 JST（= 金曜 23:00 UTC）
+    - cron: "0 23 * * 5"
+  workflow_dispatch:
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 週次レポートをメール送信
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          MAIL_FROM:       ${{ secrets.MAIL_FROM }}
+          MAIL_PASSWORD:   ${{ secrets.MAIL_PASSWORD }}
+          MAIL_TO:         ${{ secrets.MAIL_TO }}
+        run: python main.py weekly-mail
