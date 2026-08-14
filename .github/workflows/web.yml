@@ -1,6 +1,12 @@
 name: 毎朝の運用候補をWeb公開
 
 on:
+  push:
+    branches: [main]
+    paths:                    # コード等が変わった時だけ実行（結果の自動コミットでは動かさない）
+      - '**.py'
+      - 'requirements.txt'
+      - '.github/workflows/web.yml'
   schedule:
     # 平日 07:30 JST（= 前日 22:30 UTC）。朝、市場が開く前に見られるように。
     - cron: "30 22 * * 0-4"
