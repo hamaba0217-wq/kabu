@@ -74,6 +74,10 @@ def build_html(df, as_of):
   .note {{ color: #888; font-size: 12px; margin-top: 20px; line-height: 1.6; }}
 </style></head><body><div class="wrap">
 <h1>今日の株式運用候補</h1>
+<div class="nav" style="margin-bottom:12px;">
+  <a href="index.html" style="color:#1565c0;text-decoration:none;margin-right:12px;">今日の候補</a>
+  <a href="results.html" style="color:#1565c0;text-decoration:none;">推奨の実績 →</a>
+</div>
 <div class="meta">データ時点: {_esc(as_of)} ／ 生成: {now}</div>
 """)
 
@@ -94,9 +98,9 @@ def build_html(df, as_of):
                 target = entry * (1 + TARGET_PCT / 100)
                 parts.append(f"""<div class="card strong">
 <div class="name">{name} <span class="sec">（{code}）{sec}</span></div>
-<div class="price">現値 <b>{entry:,.1f}円</b> →
-  <span class="stop">損切り {stop:,.1f}円(-5%)</span> /
-  <span class="target">利確 {target:,.1f}円(+10%)</span></div>
+<div class="price">買い指値 <b>{entry:,.1f}円</b>（現値）<br>
+  <span class="target">売り/利確 {target:,.1f}円(+10%)</span> ／
+  <span class="stop">損切り {stop:,.1f}円(-5%)</span></div>
 <div class="stat">過去: 平均(損切5%){r.get('平均_損切5%'):+.2f}% ／
   2週で+10%到達 {r.get('2週で+10%到達%','?')}% ／
   -5%到達 {r.get('2週で-5%到達%','?')}% ／ n{r.get('過去該当n')}</div>
@@ -151,6 +155,14 @@ def main():
         f.write(html_str)
     print(f"HTMLレポートを生成しました: {path}")
     print(f"候補 {len(df)}件 / データ時点 {as_of}")
+
+    # 推奨を履歴に記録し、その後の結果を追跡して実績ページを生成
+    import track_picks
+    strong = _pick_strong(df) if not df.empty else df
+    track_picks.record_picks(strong, as_of)
+    res = track_picks.build_and_save_results(quotes)
+    n_rec = len(res) if res is not None else 0
+    print(f"推奨の実績ページを生成しました: {OUT_DIR}/results.html（記録 {n_rec}件）")
 
 
 if __name__ == "__main__":

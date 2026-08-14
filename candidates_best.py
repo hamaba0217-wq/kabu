@@ -45,6 +45,8 @@ TARGET_DOWN = -5.0         # 下落ライン（%）：-5%到達を測る
 
 
 LAG_DAYS = 7    # 需給データの公表遅延（先読み防止）
+MIN_TURNOVER_VALUE = 500_000_000   # 直近3日平均の売買代金の下限（5億円）。流動性フィルタ
+TURNOVER_DAYS = 3                   # 売買代金を平均する日数（直近3日）
 
 
 def _latest_by_key(df, key_col, date_col, as_of):
@@ -141,6 +143,16 @@ def find(quotes, fin, listed, margin=None, short_ratio=None):
     # 各銘柄その日に1行なので、date==as_of で最新スナップショットになる。
     snap = qi[qi["date"] == as_of].drop_duplicates("code", keep="last").set_index("code")
 
+    # 直近TURNOVER_DAYS日の平均売買代金（流動性フィルタ用）。
+    # turnover_value が無い場合は close×volume で概算（sourcesと同じ）。
+    avg_turnover = {}
+    if "turnover_value" in qi.columns:
+        qtv = qi.sort_values(["code", "date"])
+        for code_g, gg in qtv.groupby("code"):
+            tv = gg["turnover_value"].tail(TURNOVER_DAYS)
+            if len(tv) > 0 and tv.notna().any():
+                avg_turnover[str(code_g)] = float(tv.mean())
+
     # 業種を付与
     sec = {}
     sec_code = {}
@@ -187,6 +199,10 @@ def find(quotes, fin, listed, margin=None, short_ratio=None):
             continue
         # 高勝率業種
         if not _f_high_win_sector(r):
+            continue
+        # 流動性フィルタ：直近3日平均の売買代金が5億円未満なら除外
+        atv = avg_turnover.get(code)
+        if atv is None or atv < MIN_TURNOVER_VALUE:
             continue
         # 決算1か月回避：次の決算まで20営業日以内なら除外
         earnings = _next_earnings_date(fin_by_code, code, as_of)
@@ -238,6 +254,7 @@ def find(quotes, fin, listed, margin=None, short_ratio=None):
                 if pd.notna(r.get("pct_from_high")) else None,
             "次決算まで営業日": days_until if days_until is not None else "不明",
             "終値": round(float(r["close"]), 1),
+            "売買代金(3日平均)億": round(atv / 1e8, 1) if atv is not None else None,
             "信用買い残": int(long_m) if long_m is not None else None,
             "信用売り残": int(short_m) if short_m is not None else None,
             "信用倍率": round(margin_ratio, 2) if margin_ratio is not None else None,
