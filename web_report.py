@@ -107,11 +107,16 @@ def main():
     # 通常はデータを限界まで使う（分析の質・勝率を優先）。data/ をキャッシュして差分取得。
     # ただし初回はキャッシュが無くフル取得が重い。環境変数 LIGHT_MODE=1 のときは
     # 期間を絞って軽く取得し、まずキャッシュを作る（初回のタイムアウト回避用）。
-    light = os.environ.get("LIGHT_MODE", "") in ("1", "true", "True")
+    # 初回のキャッシュ作成を確実にするため、当面は軽量モードを既定にする。
+    # 環境変数 LIGHT_MODE=0 を明示したときだけフル取得する。
+    # （キャッシュができたら、web.yml で LIGHT_MODE=0 に変えてフルに戻せる）
+    _lm = os.environ.get("LIGHT_MODE", "").strip().lower()
+    light = _lm not in ("0", "false", "no")   # 空・未設定・1・true はすべて軽量
     if light:
-        print("  [LIGHT_MODE] 軽量取得でキャッシュを作成します（期間を短縮）")
-        quote_days, fin_days, sd_days = 400, 500, 60
+        print("  [LIGHT_MODE] 軽量取得（期間短縮）でキャッシュを作成/更新します", flush=True)
+        quote_days, fin_days, sd_days = 400, 400, 60
     else:
+        print("  [FULLモード] データを限界まで取得します", flush=True)
         quote_days = fin_days = sd_days = config.BACKTEST_LOOKBACK_DAYS
     quotes = jq.quotes(quote_days)
     print(f"  株価取得完了: {len(quotes):,}行", flush=True)
