@@ -114,15 +114,22 @@ def main():
     else:
         quote_days = fin_days = sd_days = config.BACKTEST_LOOKBACK_DAYS
     quotes = jq.quotes(quote_days)
+    print(f"  株価取得完了: {len(quotes):,}行", flush=True)
     fin = jq.financials(fin_days)
+    print(f"  決算取得完了: {len(fin):,}行", flush=True)
     listed = jq.listed()
+    print(f"  銘柄取得完了: {len(listed):,}件", flush=True)
     try:
         margin = jq.margin(sd_days)
-    except Exception:
+        print(f"  信用残取得完了: {len(margin):,}行", flush=True)
+    except Exception as e:
+        print(f"  信用残スキップ: {e}", flush=True)
         margin = None
     try:
         short_ratio = jq.short_ratio(sd_days)
-    except Exception:
+        print(f"  空売り比率取得完了: {len(short_ratio):,}行", flush=True)
+    except Exception as e:
+        print(f"  空売り比率スキップ: {e}", flush=True)
         short_ratio = None
 
     df, as_of = find_best(quotes, fin, listed, margin=margin, short_ratio=short_ratio)
