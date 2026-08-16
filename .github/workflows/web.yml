@@ -11,6 +11,11 @@ on:
     # 平日 07:30 JST（= 前日 22:30 UTC）。朝、市場が開く前に見られるように。
     - cron: "30 22 * * 0-4"
   workflow_dispatch:        # 手動実行ボタン（いつでも押せる）
+    inputs:
+      light_mode:
+        description: "初回はONにして軽量取得でキャッシュを作る（2回目以降はOFFでフル）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write           # 生成したHTMLをリポジトリに保存するため
@@ -18,7 +23,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30       # 30分で打ち切り（重すぎる時に無限に回さない）
+    timeout-minutes: 60       # 初回のフル取得に備える。2回目以降はキャッシュで数分
     steps:
       - uses: actions/checkout@v4
 
@@ -27,11 +32,23 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # 株価・決算などのデータキャッシュ（data/）を復元。
+      # 前回の実行で保存した data/ を読み込み、差分だけ取得して高速化する。
+      # キーに日付を含め、日ごとに新しく保存。restore-keys で前日分を引き継ぐ。
+      - name: データキャッシュを復元
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: jquants-data-${{ github.run_id }}
+          restore-keys: |
+            jquants-data-
+
       - run: pip install -r requirements.txt
 
       - name: 運用候補のHTMLを生成
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          LIGHT_MODE: ${{ github.event.inputs.light_mode }}
         run: python main.py web-report
 
       - name: docs/index.html を公開用にコミット

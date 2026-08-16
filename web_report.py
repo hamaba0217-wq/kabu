@@ -43,43 +43,14 @@ def _esc(v):
 
 
 def build_html(df, as_of):
+    from web_common import page_head, page_foot
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     strong = _pick_strong(df) if not df.empty else pd.DataFrame()
 
     parts = []
-    parts.append(f"""<!DOCTYPE html>
-<html lang="ja"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>今日の株式運用候補</title>
-<style>
-  body {{ font-family: -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
-         margin: 0; padding: 16px; background: #f5f6f8; color: #1a1a2e; }}
-  .wrap {{ max-width: 720px; margin: 0 auto; }}
-  h1 {{ font-size: 20px; margin: 8px 0; }}
-  .meta {{ color: #666; font-size: 13px; margin-bottom: 16px; }}
-  .card {{ background: #fff; border-radius: 12px; padding: 16px; margin: 12px 0;
-          box-shadow: 0 1px 4px rgba(0,0,0,.08); }}
-  .strong {{ border-left: 4px solid #2e7d32; }}
-  .name {{ font-size: 17px; font-weight: 700; }}
-  .sec {{ color: #666; font-size: 13px; }}
-  .price {{ margin: 8px 0; font-size: 15px; }}
-  .stop {{ color: #c62828; font-weight: 600; }}
-  .target {{ color: #2e7d32; font-weight: 600; }}
-  .stat {{ color: #444; font-size: 13px; margin-top: 6px; }}
-  .none {{ background: #fff8e1; padding: 16px; border-radius: 12px; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }}
-  th, td {{ padding: 6px 4px; text-align: right; border-bottom: 1px solid #eee; }}
-  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) {{ text-align: left; }}
-  .note {{ color: #888; font-size: 12px; margin-top: 20px; line-height: 1.6; }}
-</style></head><body><div class="wrap">
-<h1>今日の株式運用候補</h1>
-<div class="nav" style="margin-bottom:12px;">
-  <a href="index.html" style="color:#1565c0;text-decoration:none;margin-right:12px;">今日の候補</a>
-  <a href="results.html" style="color:#1565c0;text-decoration:none;">推奨の実績 →</a>
-</div>
-<div class="meta">データ時点: {_esc(as_of)} ／ 生成: {now}</div>
-""")
+    parts.append(page_head("今日の運用候補", "index.html"))
+    parts.append(f'<h1>今日の株式運用候補</h1>')
+    parts.append(f'<div class="meta">データ時点: {_esc(as_of)} ／ 生成: {now}</div>')
 
     # 運用サマリー
     parts.append('<h1>★ 特に有力な候補</h1>')
@@ -110,6 +81,7 @@ def build_html(df, as_of):
     if not df.empty:
         parts.append(f'<h1>候補一覧（{len(df)}件）</h1>')
         cols = [("銘柄名", "銘柄"), ("業種", "業種"), ("高値からの下落%", "下落%"),
+                ("売買代金(3日平均)億", "代金億"),
                 ("平均_損切5%", "平均(損切5%)"), ("2週で+10%到達%", "+10%到達"),
                 ("2週で-5%到達%", "-5%到達"), ("過去該当n", "n")]
         cols = [(c, lbl) for c, lbl in cols if c in df.columns]
@@ -118,15 +90,13 @@ def build_html(df, as_of):
         for _, r in df.iterrows():
             tds = "".join(f"<td>{_esc(r.get(c,''))}</td>" for c, _ in cols)
             rows.append(f"<tr>{tds}</tr>")
-        parts.append(f"<table><thead><tr>{thead}</tr></thead>"
-                     f"<tbody>{''.join(rows)}</tbody></table>")
+        parts.append(f'<div class="tablewrap"><table><thead><tr>{thead}</tr></thead>'
+                     f"<tbody>{''.join(rows)}</tbody></table></div>")
 
-    parts.append("""<div class="note">
-※ このページは過去データにもとづく分析補助であり、投資助言ではありません。<br>
-※ 売買の判断と結果の責任は、すべて利用者ご自身にあります。<br>
-※ 損切り-5%・利確+10%は検証で用いた目安。手数料・スリッページは未考慮です。<br>
-※ 「特に有力」= 過去該当n≧30・平均(損切5%)プラス・+10%到達≧-5%到達 を満たすもの。
-</div></div></body></html>""")
+    note = ('<div class="note">'
+            '※ 「特に有力」= 過去該当n≧30・平均(損切5%)プラス・+10%到達≧-5%到達 を満たすもの。'
+            '損切り-5%・利確+10%は検証で用いた目安。</div>')
+    parts.append(page_foot(note))
     return "".join(parts)
 
 
@@ -134,22 +104,24 @@ def main():
     from sources import JQuants, JST
     jq = JQuants()
     print("データを読み込み中...")
-    # 運用候補（押し目×高勝率業種）に必要な期間だけ取得する。
-    # 52週高値の計算に1年強あれば足りるので、クラウドでも短時間で終わる。
-    # BACKTEST_LOOKBACK_DAYS(2年)は重すぎる（クラウドで毎回ゼロから取得するため）。
-    QUOTE_DAYS = 450   # 株価：52週高値+αに十分
-    FIN_DAYS = 500     # 決算：前年比の計算に1年強
-    quotes = jq.quotes(QUOTE_DAYS)
-    fin = jq.financials(FIN_DAYS)
+    # 通常はデータを限界まで使う（分析の質・勝率を優先）。data/ をキャッシュして差分取得。
+    # ただし初回はキャッシュが無くフル取得が重い。環境変数 LIGHT_MODE=1 のときは
+    # 期間を絞って軽く取得し、まずキャッシュを作る（初回のタイムアウト回避用）。
+    light = os.environ.get("LIGHT_MODE", "") in ("1", "true", "True")
+    if light:
+        print("  [LIGHT_MODE] 軽量取得でキャッシュを作成します（期間を短縮）")
+        quote_days, fin_days, sd_days = 400, 500, 60
+    else:
+        quote_days = fin_days = sd_days = config.BACKTEST_LOOKBACK_DAYS
+    quotes = jq.quotes(quote_days)
+    fin = jq.financials(fin_days)
     listed = jq.listed()
-    # 信用残・空売り比率は候補の補助情報。取得失敗しても候補は出せるので、
-    # クラウドの負荷軽減のため短期間だけ試し、失敗しても続行する。
     try:
-        margin = jq.margin(60)
+        margin = jq.margin(sd_days)
     except Exception:
         margin = None
     try:
-        short_ratio = jq.short_ratio(60)
+        short_ratio = jq.short_ratio(sd_days)
     except Exception:
         short_ratio = None
 
@@ -170,6 +142,11 @@ def main():
     res = track_picks.build_and_save_results(quotes)
     n_rec = len(res) if res is not None else 0
     print(f"推奨の実績ページを生成しました: {OUT_DIR}/results.html（記録 {n_rec}件）")
+
+    # 追加の研究ページ（業種別成績・市場の状況・検証の記録）
+    import web_extras
+    made = web_extras.build_and_save_extras(quotes, listed, res)
+    print(f"追加ページを生成しました: {', '.join(made)}")
 
 
 if __name__ == "__main__":

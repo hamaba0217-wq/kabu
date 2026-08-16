@@ -141,44 +141,19 @@ def _summary_stats(df):
 
 
 def build_results_html(df):
+    from web_common import page_head, page_foot
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    parts = [f"""<!DOCTYPE html>
-<html lang="ja"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>推奨の実績</title>
-<style>
-  body {{ font-family: -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
-         margin: 0; padding: 16px; background: #f5f6f8; color: #1a1a2e; }}
-  .wrap {{ max-width: 760px; margin: 0 auto; }}
-  h1 {{ font-size: 20px; margin: 8px 0; }}
-  .meta {{ color: #666; font-size: 13px; margin-bottom: 16px; }}
-  .nav a {{ display:inline-block; margin-right:12px; color:#1565c0; text-decoration:none;
-           font-size:14px; }}
-  .stats {{ background:#fff; border-radius:12px; padding:16px; margin:12px 0;
-           box-shadow:0 1px 4px rgba(0,0,0,.08); font-size:14px; }}
-  table {{ width:100%; border-collapse:collapse; font-size:12px; margin-top:8px;
-          background:#fff; border-radius:8px; overflow:hidden; }}
-  th, td {{ padding:7px 5px; text-align:right; border-bottom:1px solid #eee; }}
-  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) {{ text-align:left; }}
-  th {{ background:#eef1f5; }}
-  .win {{ color:#2e7d32; font-weight:600; }}
-  .lose {{ color:#c62828; font-weight:600; }}
-  .track {{ color:#888; }}
-  .note {{ color:#888; font-size:12px; margin-top:20px; line-height:1.6; }}
-</style></head><body><div class="wrap">
-<div class="nav"><a href="index.html">← 今日の候補</a><a href="results.html">推奨の実績</a></div>
-<h1>推奨の実績（すべての記録）</h1>
-<div class="meta">更新: {now}</div>
-"""]
+    parts = [page_head("推奨の実績", "results.html")]
+    parts.append('<h1>推奨の実績（すべての記録）</h1>')
+    parts.append(f'<div class="meta">更新: {now}</div>')
 
     if df is None or df.empty:
-        parts.append('<div class="stats">まだ記録がありません。'
+        parts.append('<div class="none">まだ記録がありません。'
                      '毎朝の実行で推奨が記録され、その後の結果がここに貯まります。</div>')
     else:
         n_done, n_win, n_track = _summary_stats(df)
         wr = f"{n_win/n_done*100:.0f}%" if n_done else "—"
-        parts.append(f"""<div class="stats">
+        parts.append(f"""<div class="card">
 記録した推奨: <b>{len(df)}件</b>／結果確定: <b>{n_done}件</b>
 （利確到達 {n_win}件・損切り到達 {n_done-n_win}件、勝率 <b>{wr}</b>）／
 追跡中: {n_track}件
@@ -204,15 +179,13 @@ def build_results_html(df):
                 f'<span class="{cls}">{_esc(res)}</span>',
             ]
             rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in tds) + "</tr>")
-        parts.append(f"<table><thead><tr>{thead}</tr></thead>"
-                     f"<tbody>{''.join(rows)}</tbody></table>")
+        parts.append(f'<div class="tablewrap"><table><thead><tr>{thead}</tr></thead>'
+                     f"<tbody>{''.join(rows)}</tbody></table></div>")
 
-    parts.append("""<div class="note">
-※ 買い指値＝推奨日の終値。翌日その値で約定できたと仮定した追跡です（実際は前後します）。<br>
-※ 利確+10%・損切り-5%は終値ベース判定。到達順で先に来たほうを結果とします。<br>
-※ 手数料・スリッページは未考慮。過去の記録であり、将来を保証しません。<br>
-※ 投資助言ではありません。売買の判断と責任は利用者ご自身にあります。
-</div></div></body></html>""")
+    note = ('<div class="note">'
+            '※ 買い指値＝推奨日の終値。翌日その値で約定できたと仮定した追跡です。'
+            '利確+10%・損切り-5%は終値ベース、到達順で先に来たほうを結果とします。</div>')
+    parts.append(page_foot(note))
     return "".join(parts)
 
 
