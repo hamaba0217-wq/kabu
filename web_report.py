@@ -134,15 +134,22 @@ def main():
     from sources import JQuants, JST
     jq = JQuants()
     print("データを読み込み中...")
-    quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
-    fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+    # 運用候補（押し目×高勝率業種）に必要な期間だけ取得する。
+    # 52週高値の計算に1年強あれば足りるので、クラウドでも短時間で終わる。
+    # BACKTEST_LOOKBACK_DAYS(2年)は重すぎる（クラウドで毎回ゼロから取得するため）。
+    QUOTE_DAYS = 450   # 株価：52週高値+αに十分
+    FIN_DAYS = 500     # 決算：前年比の計算に1年強
+    quotes = jq.quotes(QUOTE_DAYS)
+    fin = jq.financials(FIN_DAYS)
     listed = jq.listed()
+    # 信用残・空売り比率は候補の補助情報。取得失敗しても候補は出せるので、
+    # クラウドの負荷軽減のため短期間だけ試し、失敗しても続行する。
     try:
-        margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        margin = jq.margin(60)
     except Exception:
         margin = None
     try:
-        short_ratio = jq.short_ratio(config.BACKTEST_LOOKBACK_DAYS)
+        short_ratio = jq.short_ratio(60)
     except Exception:
         short_ratio = None
 

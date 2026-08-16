@@ -18,6 +18,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30       # 30分で打ち切り（重すぎる時に無限に回さない）
     steps:
       - uses: actions/checkout@v4
 
