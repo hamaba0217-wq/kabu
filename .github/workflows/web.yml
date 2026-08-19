@@ -48,7 +48,7 @@ jobs:
       - name: 運用候補のHTMLを生成
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
-          LIGHT_MODE: ${{ github.event.inputs.light_mode }}
+          LIGHT_MODE: ${{ github.event.inputs.light_mode || '0' }}
           PYTHONUNBUFFERED: "1"
         run: python -u main.py web-report
 
