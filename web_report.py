@@ -77,19 +77,38 @@ def build_html(df, as_of):
   -5%到達 {r.get('2週で-5%到達%','?')}% ／ n{r.get('過去該当n')}</div>
 </div>""")
 
-    # 候補一覧テーブル
+    # 候補一覧テーブル（各銘柄に買い指値・利確・損切りも表示）
     if not df.empty:
         parts.append(f'<h1>候補一覧（{len(df)}件）</h1>')
+        parts.append('<p style="font-size:12px;color:#667;">各銘柄の買い指値（現値）と、'
+                     'そこから利確+10%・損切り-5%の目安価格です。表の列名タップで並び替え。</p>')
         cols = [("銘柄名", "銘柄"), ("業種", "業種"), ("高値からの下落%", "下落%"),
                 ("売買代金(3日平均)億", "代金億"),
-                ("平均_損切5%", "平均(損切5%)"), ("2週で+10%到達%", "+10%到達"),
-                ("2週で-5%到達%", "-5%到達"), ("過去該当n", "n")]
+                ("買い指値", "買い指値"), ("利確", "利確+10%"), ("損切り", "損切り-5%"),
+                ("平均_損切5%", "平均(損5)"), ("2週で+10%到達%", "+10到達"),
+                ("2週で-5%到達%", "-5到達"), ("過去該当n", "n")]
+        # 各行に指値・利確・損切りを計算して持たせる
+        df = df.copy()
+        close_col = df["終値"] if "終値" in df.columns else None
+        if close_col is not None:
+            df["買い指値"] = close_col.round(1)
+            df["利確"] = (close_col * (1 + TARGET_PCT/100)).round(1)
+            df["損切り"] = (close_col * (1 + STOP_PCT/100)).round(1)
         cols = [(c, lbl) for c, lbl in cols if c in df.columns]
         thead = "".join(f"<th>{_esc(lbl)}</th>" for _, lbl in cols)
         rows = []
         for _, r in df.iterrows():
-            tds = "".join(f"<td>{_esc(r.get(c,''))}</td>" for c, _ in cols)
-            rows.append(f"<tr>{tds}</tr>")
+            cells = []
+            for c, _ in cols:
+                v = r.get(c, "")
+                # 利確は緑、損切りは赤で色分け
+                if c == "利確":
+                    cells.append(f'<td class="target">{_esc(v)}</td>')
+                elif c == "損切り":
+                    cells.append(f'<td class="stop">{_esc(v)}</td>')
+                else:
+                    cells.append(f"<td>{_esc(v)}</td>")
+            rows.append(f"<tr>{''.join(cells)}</tr>")
         parts.append(f'<div class="tablewrap"><table><thead><tr>{thead}</tr></thead>'
                      f"<tbody>{''.join(rows)}</tbody></table></div>")
 
