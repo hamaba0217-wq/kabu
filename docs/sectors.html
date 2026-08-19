@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<title>業種別成績</title>
+<style>
+  * { box-sizing: border-box; -webkit-text-size-adjust: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+         "Noto Sans JP", sans-serif; margin: 0; background: #f5f6f8; color: #1a1a2e;
+         font-size: 16px; line-height: 1.5; }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 12px 14px 40px; }
+  /* 上部固定ナビ：スマホで横スクロールできるメニュー */
+  .topnav { position: sticky; top: 0; z-index: 100; background: #1a2744;
+            overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;
+            box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+  .topnav a { display: inline-block; padding: 14px 16px; color: #cfd8ec;
+              text-decoration: none; font-size: 14px; font-weight: 600; }
+  .topnav a.on { color: #fff; border-bottom: 3px solid #4da3ff; background: #223357; }
+  .topnav a:active { background: #2c3f66; }
+  h1 { font-size: 19px; margin: 16px 0 6px; }
+  h2 { font-size: 16px; margin: 20px 0 8px; color: #2a3a5c; }
+  .meta { color: #667; font-size: 12px; margin-bottom: 12px; }
+  .card { background: #fff; border-radius: 14px; padding: 15px; margin: 12px 0;
+          box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+  .card.strong { border-left: 4px solid #2e7d32; }
+  .name { font-size: 17px; font-weight: 700; }
+  .sec { color: #778; font-size: 13px; font-weight: 400; }
+  .price { margin: 10px 0; font-size: 15px; }
+  .big { font-size: 20px; font-weight: 700; }
+  .stop { color: #c62828; font-weight: 600; }
+  .target { color: #2e7d32; font-weight: 600; }
+  .stat { color: #556; font-size: 13px; margin-top: 8px; line-height: 1.7; }
+  .none { background: #fff8e1; padding: 15px; border-radius: 14px; font-size: 14px; }
+  /* 表：スマホでは横スクロール可能に */
+  .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch;
+               border-radius: 10px; background: #fff; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 480px; }
+  th, td { padding: 9px 7px; text-align: right; border-bottom: 1px solid #eef; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th { background: #eef1f6; position: sticky; top: 0; font-size: 12px; }
+  /* 並び替え可能なヘッダ */
+  table.sortable th { cursor: pointer; user-select: none; white-space: nowrap; }
+  table.sortable th:active { background: #dde3ec; }
+  table.sortable th .arrow { color: #4da3ff; font-size: 10px; margin-left: 2px; }
+  .win { color: #2e7d32; font-weight: 700; }
+  .lose { color: #c62828; font-weight: 700; }
+  .track { color: #889; }
+  .pos { color: #2e7d32; }
+  .neg { color: #c62828; }
+  .bar { height: 8px; border-radius: 4px; background: #e3e8f0; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: #4da3ff; }
+  .note { color: #889; font-size: 12px; margin-top: 22px; line-height: 1.7; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px;
+          font-weight:600; }
+  .pill.up { background:#e6f4ea; color:#2e7d32; }
+  .pill.down { background:#fce8e8; color:#c62828; }
+  .pill.flat { background:#eef; color:#556; }
+</style></head><body>
+<div class="topnav"><a href="index.html" class="">今日の候補</a><a href="results.html" class="">推奨の実績</a><a href="sectors.html" class="on">業種別成績</a><a href="market.html" class="">市場の状況</a><a href="notes.html" class="">検証の記録</a></div>
+<div class="wrap">
+<h1>業種別の成績</h1><div class="meta">更新: 2026-08-18 23:04</div><p style="font-size:13px;color:#556;">推奨した銘柄を業種ごとにまとめ、どの業種が実際に勝てているかを集計します。実績が貯まるほど傾向が見えます。</p><div class="none">まだ集計できる推奨がありません。毎朝の記録が貯まると、業種別の成績がここに出ます。</div>
+<div class="note">
+※ 本ページは過去データにもとづく分析補助であり、投資助言ではありません。<br>
+※ 売買の判断と結果の責任は、すべて利用者ご自身にあります。<br>
+※ 手数料・スリッページは未考慮です。過去の傾向は将来を保証しません。
+</div></div>
+<script>
+// 表のヘッダをタップで昇順/降順に並び替え。数値・％・カンマ付きは数値として比較。
+(function() {
+  function parseVal(s) {
+    if (s == null) return {n: NaN, t: ''};
+    var t = s.trim();
+    // 数値抽出（+/-、カンマ、％、小数に対応）
+    var m = t.replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+    var n = m ? parseFloat(m[0]) : NaN;
+    return {n: n, t: t};
+  }
+  function makeSortable(table) {
+    if (table.getAttribute('data-sortable') === '1') return;  // 二重適用を防ぐ
+    table.setAttribute('data-sortable', '1');
+    table.classList.add('sortable');
+    var ths = table.querySelectorAll('thead th');
+    ths.forEach(function(th, col) {
+      var arrow = document.createElement('span');
+      arrow.className = 'arrow'; arrow.textContent = '';
+      th.appendChild(arrow);
+      th.addEventListener('click', function() {
+        var tbody = table.querySelector('tbody');
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+        var asc = th.getAttribute('data-asc') !== 'true';
+        // 他の列の矢印を消す
+        ths.forEach(function(o) { if (o!==th) { o.removeAttribute('data-asc');
+          var a=o.querySelector('.arrow'); if(a) a.textContent=''; } });
+        rows.sort(function(a, b) {
+          var av = parseVal(a.children[col] ? a.children[col].textContent : '');
+          var bv = parseVal(b.children[col] ? b.children[col].textContent : '');
+          var bothNum = !isNaN(av.n) && !isNaN(bv.n);
+          var cmp;
+          if (bothNum) cmp = av.n - bv.n;
+          else cmp = av.t.localeCompare(bv.t, 'ja');
+          return asc ? cmp : -cmp;
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+        th.setAttribute('data-asc', asc ? 'true' : 'false');
+        arrow.textContent = asc ? '▲' : '▼';
+      });
+    });
+  }
+  document.querySelectorAll('table').forEach(makeSortable);
+})();
+</script>
+</body></html>
