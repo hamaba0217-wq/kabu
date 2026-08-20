@@ -1,6 +1,6 @@
-﻿data/
+﻿# data/
 __pycache__/
 output/
-*.pkl
+# *.pkl
 docs/
 history/
