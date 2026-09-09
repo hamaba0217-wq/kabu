@@ -3,7 +3,7 @@ name: Daily Stock Screener Report
 on:
   schedule:
     # 毎日日本時間の朝8時（UTC 23:00）に実行
-    - cron: '0 23 * * *'
+    - cron: '30 23 * * *'
   workflow_dispatch:
 
 jobs:
