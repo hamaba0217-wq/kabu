@@ -74,6 +74,7 @@ import streak_nomura_sim
 import streak_win_loss_analysis
 import streak_market_sector_analysis
 import candidates_dynamic
+import backtest_portfolio
 import bigwin_reverse
 import limitup_streak_signal
 import limitup_streak_buy_optimize
@@ -418,6 +419,19 @@ def main() -> None:
         print("データ読み込み中（2年分・OHLC）...")
         quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
         limitup_strategy.run(quotes)
+    elif cmd == "portfolio-sim":
+        import cache
+        print("ローカルキャッシュからデータを読み込んでいます（APIアクセスなし）...")
+        quotes = cache.load("quotes")
+        if quotes is None or quotes.empty:
+            quotes = cache.load("quotes_backtest")
+        fin = cache.load("fin")
+        listed = cache.load("listed")
+        if listed is None or listed.empty:
+            from sources import JQuants
+            jq = JQuants()
+            listed = jq.listed()
+        backtest_portfolio.run_portfolio_simulation(quotes, fin=fin, listed=listed, margin=None)
     elif cmd == "streak-dynamic":
         import config
         from sources import JQuants
