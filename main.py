@@ -52,6 +52,31 @@ import validate_shortratio
 import candidates_sr
 import candidates_best
 import web_report
+import limitup_analyze
+import limitup_strategy
+import limitup_intraday
+import limitup_dip
+import limitup_all_hypotheses
+import limitup_attributes
+import limitup_14d_search
+import limitup_precursor
+import limitup_precursor_strategy
+import streak_deep_dive
+import streak_return_optimize
+import streak_best_price
+import streak_industry_filter
+import streak_comprehensive_optimize
+import streak_win15_optimize
+import streak_bottom_explosion
+import streak_live_sim
+import streak_param_matrix
+import streak_nomura_sim
+import streak_win_loss_analysis
+import streak_market_sector_analysis
+import candidates_dynamic
+import bigwin_reverse
+import limitup_streak_signal
+import limitup_streak_buy_optimize
 import fivebagger
 import precursor
 import probe_tdnet
@@ -366,6 +391,353 @@ def main() -> None:
         candidates_best.main(sys.argv[2:])
     elif cmd == "web-report":
         web_report.main()
+    elif cmd == "limitup-analyze":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        try:
+            short_ratio = jq.short_ratio(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            short_ratio = None
+        limitup_analyze.run(quotes, fin, listed, margin, short_ratio)
+    elif cmd == "limitup-strategy":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        limitup_strategy.run(quotes)
+    elif cmd == "streak-dynamic":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        candidates_dynamic.run_dynamic_candidates(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-market-sector":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        streak_market_sector_analysis.run_market_sector_analysis(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-analysis":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        streak_win_loss_analysis.run_analysis(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-nomura":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        streak_nomura_sim.run_nomura(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-matrix":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        streak_param_matrix.run_matrix(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-live":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...予期せぬエラーを防ぎます")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        streak_live_sim.run_live(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-explosion":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        streak_bottom_explosion.run_explosion(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-win15":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        streak_win15_optimize.run_win15_opt(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-comprehensive":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        streak_comprehensive_optimize.run_comprehensive(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-ind-filter":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        streak_industry_filter.run_filter_opt(quotes, fin=fin, listed=listed)
+    elif cmd == "streak-best-price":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        streak_best_price.run_best_price(quotes, fin=fin, listed=listed)
+    elif cmd == "streak-return-opt":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        streak_return_optimize.run_return_opt(quotes, fin=fin, listed=listed)
+    elif cmd == "streak-buy-opt":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        limitup_streak_buy_optimize.run_buy_optimization(quotes, fin=fin, listed=listed)
+    elif cmd == "limitup-streak-sig":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        limitup_streak_signal.run_signal_analysis(quotes, fin=fin, listed=listed)
+    elif cmd == "bigwin-rev":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        bigwin_reverse.run_analysis(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "streak-dive":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        streak_deep_dive.run_deep_dive(quotes, fin=fin, listed=listed)
+    elif cmd == "limitup-pre-trade":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        limitup_precursor_strategy.run_strategy(quotes, fin=fin, listed=listed)
+    elif cmd == "limitup-pre":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        limitup_precursor.run(quotes, fin=fin, listed=listed)
+    elif cmd == "limitup-14d":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        limitup_14d_search.run(quotes, fin=fin, listed=listed)
+    elif cmd == "limitup-attr":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        try:
+            margin = jq.margin(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            margin = None
+        limitup_attributes.run(quotes, fin=fin, listed=listed, margin=margin)
+    elif cmd == "limitup-all":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        limitup_all_hypotheses.run_all(quotes, fin=fin, listed=listed)
+    elif cmd == "limitup-dip":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        limitup_dip.run(quotes, fin=fin, listed=listed)
+    elif cmd == "limitup-intraday":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        try:
+            fin = jq.financials(config.BACKTEST_LOOKBACK_DAYS)
+        except Exception:
+            fin = None
+        listed = jq.listed()
+        limitup_intraday.run(quotes, fin=fin, listed=listed)
     elif cmd == "fivebagger":
         fivebagger.main()
     elif cmd == "precursor":

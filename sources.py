@@ -34,6 +34,9 @@ JST = dt.timezone(dt.timedelta(hours=9))
 QUOTE_COLUMNS = {
     "code":           ["Code", "LocalCode", "code"],
     "date":           ["Date", "date"],
+    "open":           ["O", "Open", "open"],                            # 生の始値（未調整）
+    "high":           ["H", "High", "high"],                            # 生の高値（未調整）
+    "low":            ["L", "Low", "low"],                              # 生の安値（未調整）
     "close":          ["C", "Close", "close"],                          # 生の終値（未調整）
     "adj_factor":     ["AdjFactor", "AdjustmentFactor", "adj_factor"],  # 分割・併合の調整係数
     "volume":         ["Vo", "Volume", "volume"],
@@ -441,7 +444,10 @@ class JQuants:
                 shifted[:-1] = rev_cum[1:]           # 翌日以降の係数（当日は含めない）
                 shifted[-1] = 1.0                    # 最新日は調整なし
                 cum[pos] = shifted
-            df["close"] = df["close"].values * cum
+            # 価格系（始値・高値・安値・終値）はすべて同じ係数で調整、出来高は逆に割る
+            for pcol in ("open", "high", "low", "close"):
+                if pcol in df.columns:
+                    df[pcol] = df[pcol].values * cum
             if "volume" in df.columns:
                 df["volume"] = df["volume"].values / cum
         if "turnover_value" not in df.columns or df["turnover_value"].isna().all():
