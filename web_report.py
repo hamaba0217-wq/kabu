@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-web_report.py - 最新の朝の指値プランCSVを読み込んで、Webサイト（HTML）に自動表示・更新するモジュール
+web_report.py - 最新の朝の指値プランCSVを読み込んで、Webサイト（HTML）の index.html をルートに直接生成・更新するモジュール
 """
 from __future__ import annotations
 import os
@@ -97,11 +97,10 @@ def generate_web_report():
 </html>
 """
 
-    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-    out_html = os.path.join(config.OUTPUT_DIR, "index.html")
+    out_html = "index.html"
     with open(out_html, "w", encoding="utf-8") as f:
         f.write(html_content)
-    print(f"  Webレポートを生成しました: {out_html}")
+    print(f"  Webレポートをルートに生成しました: {out_html}")
 
 def main():
     generate_web_report()
