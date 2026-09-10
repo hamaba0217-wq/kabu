@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import datetime as dt
 import pandas as pd
+import numpy as np
 from sources import JQuants, JST
 import config
 from badnews import _bad_flags
