@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-web_report.py - 最新の朝の指値プランCSVを読み込んで、考え方・手法ごとの違いやおすすめを表示するWebレポート（index.html）生成モジュール
+web_report.py - 最新の朝の指値プランCSVを読み込んで、GitHub Pages用の docs/index.html を生成・更新するモジュール
 """
 from __future__ import annotations
 import os
@@ -10,7 +10,7 @@ import config
 
 def generate_web_report():
     print("=" * 76)
-    print("Webレポート（考え方別・手法別おすすめ表示対応）のHTML生成中...")
+    print("Webレポート（docs/index.html出力対応）のHTML生成中...")
     print("=" * 76)
 
     pattern = os.path.join(config.OUTPUT_DIR, "*_morning_orders.csv")
@@ -27,7 +27,6 @@ def generate_web_report():
         except Exception as e:
             print(f"  CSV読み込みエラー: {e}")
 
-    # HTMLの構築（考え方・検証方法ごとの特徴とお勧めをセクションとして追加）
     html_content = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -136,10 +135,12 @@ def generate_web_report():
 </html>
 """
 
-    out_html = "index.html"
+    # docs ディレクトリを作成してその中に index.html を出力する
+    os.makedirs("docs", exist_ok=True)
+    out_html = os.path.join("docs", "index.html")
     with open(out_html, "w", encoding="utf-8") as f:
         f.write(html_content)
-    print(f"  Webレポートをルートに生成しました: {out_html}")
+    print(f"  Webレポートを docs/ に生成しました: {out_html}")
 
 def main():
     generate_web_report()
