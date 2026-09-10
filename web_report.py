@@ -13,7 +13,6 @@ def generate_web_report():
     print("Webレポート（hamaba0217-wq用）のHTML生成中...")
     print("=" * 76)
 
-    # output/ フォルダから最新の morning_orders.csv を探す
     pattern = os.path.join(config.OUTPUT_DIR, "*_morning_orders.csv")
     files = glob.glob(pattern)
 
@@ -28,7 +27,6 @@ def generate_web_report():
         except Exception as e:
             print(f"  CSV読み込みエラー: {e}")
 
-    # HTMLの構築
     html_content = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -105,5 +103,8 @@ def generate_web_report():
         f.write(html_content)
     print(f"  Webレポートを生成しました: {out_html}")
 
-if __name__ == "__main__":
+def main():
     generate_web_report()
+
+if __name__ == "__main__":
+    main()
