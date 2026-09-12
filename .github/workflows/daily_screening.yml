@@ -1,43 +1,23 @@
-name: Daily Morning Stock Screening & Web Report
-
+name: Daily Screening Report
 on:
-  schedule:
-    - cron: '30 23 * * 1-5'
   workflow_dispatch:
-
 jobs:
-  screening:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Install dependencies
-        run: |
+      - run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy requests jquants-api-client tabulate
-
-      - name: Run Morning Screening & Order Plan
+          pip install -r requirements.txt
+          pip install yfinance jquants-api-client
+      - run: python web_report.py
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
-        run: |
-          python daily_morning_routine.py
-
-      - name: Generate Web Report HTML
-        run: |
-          python web_report.py
-
-      - name: Commit and push changes to site
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add index.html
-          git commit -m "Auto-update daily web report [skip ci]" || echo "No changes to commit"
-          git push
+          LIGHT_MODE: "1"
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto screening"
+          branch: main
