@@ -1,149 +1,204 @@
 # -*- coding: utf-8 -*-
 """
-web_report.py - 最新の朝の指値プランCSVを読み込んで、GitHub Pages用の docs/index.html を生成・更新するモジュール
+今日の運用候補を、スマホで見やすいHTMLページにして出力する。
+GitHub Actions で毎朝実行し、GitHub Pages で公開する用途。
+
+出力先: docs/index.html （GitHub Pages が docs/ を公開する設定にする）
 """
+
 from __future__ import annotations
+
+import datetime as dt
+import html
 import os
-import glob
+
+import numpy as np
 import pandas as pd
+
 import config
+from candidates_best import find as find_best
 
-def generate_web_report():
-    print("=" * 76)
-    print("Webレポート（docs/index.html出力対応）のHTML生成中...")
-    print("=" * 76)
+MIN_N = 30
+STOP_PCT = -5.0
+TARGET_PCT = 10.0
+OUT_DIR = "."
 
-    pattern = os.path.join(config.OUTPUT_DIR, "*_morning_orders.csv")
-    files = glob.glob(pattern)
 
-    df = pd.DataFrame()
-    target_date = "データなし"
-    if files:
-        latest_file = max(files, key=os.path.getmtime)
-        target_date = os.path.basename(latest_file).split("_")[0]
-        try:
-            df = pd.read_csv(latest_file)
-            print(f"  最新の指値CSVを読み込みました: {latest_file} (件数: {len(df)})")
-        except Exception as e:
-            print(f"  CSV読み込みエラー: {e}")
+def _pick_strong(df):
+    """運用サマリーに出す『特に有力』な候補を絞る（candidates_best と同基準）。"""
+    d = df.copy()
+    if "過去該当n" in d.columns:
+        d = d[d["過去該当n"] >= MIN_N]
+    if "平均_損切5%" in d.columns:
+        d = d[d["平均_損切5%"] > 0]
+    if "2週で+10%到達%" in d.columns and "2週で-5%到達%" in d.columns:
+        d = d[d["2週で+10%到達%"].fillna(0) >= d["2週で-5%到達%"].fillna(999)]
+    if "平均_損切5%" in d.columns:
+        d = d.sort_values("平均_損切5%", ascending=False)
+    return d
 
-    html_content = f"""<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <title>今日の株式運用候補 ＆ 指値プラン・検証手法別おすすめ</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: #f8f9fa; color: #333; line-height: 1.6; }}
-        h1 {{ color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; }}
-        h2 {{ color: #2c3e50; margin-top: 30px; font-size: 1.3em; border-left: 4px solid #1a73e8; padding-left: 10px; }}
-        .date-badge {{ background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 4px; font-weight: bold; display: inline-block; margin-bottom: 20px; }}
-        
-        /* 検証手法ごとの解説カード */
-        .strategy-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }}
-        .strategy-card {{ background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 20px; border-top: 4px solid #1a73e8; }}
-        .strategy-card.alt {{ border-top-color: #28a745; }}
-        .strategy-card h3 {{ margin-top: 0; color: #1a73e8; font-size: 1.1em; }}
-        .strategy-card.alt h3 {{ color: #28a745; }}
-        .strategy-card p {{ margin: 8px 0; font-size: 0.95em; color: #555; }}
-        .strategy-card ul {{ padding-left: 20px; margin: 8px 0; font-size: 0.92em; color: #444; }}
 
-        /* テーブルスタイル */
-        table {{ width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 6px; overflow: hidden; margin-top: 10px; }}
-        th, td {{ padding: 12px 15px; text-align: left; border-bottom: 1px solid #dee2e6; }}
-        th {{ background: #1a73e8; color: white; font-weight: 600; }}
-        tr:hover {{ background: #f1f3f5; }}
-        .badge-main {{ background: #28a745; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }}
-        .badge-sub {{ background: #6c757d; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; }}
-        .price {{ font-family: monospace; font-weight: bold; }}
-    </style>
-</head>
-<body>
-    <h1>今日の株式運用候補 ＆ 指値プラン</h1>
-    <div class="date-badge">基準日: {target_date}</div>
+def _esc(v):
+    return html.escape(str(v))
 
-    <h2>💡 検証方法・アプローチ別の特徴とおすすめ</h2>
-    <div class="strategy-container">
-        <!-- 戦略1 -->
-        <div class="strategy-card">
-            <h3>📈 【本命セクター重視】アプローチ</h3>
-            <p><b>考え方:</b> 過去のバックテストデータから「勝率55%以上」が実証されている高勝率セクター（海運、銀行、パルプ・紙など）に資金を集中させる方法。</p>
-            <p><b>こんな方におすすめ:</b></p>
-            <ul>
-                <li>相場全体のトレンドに逆らわず、確率的に優位な業種から手堅くリターンを狙いたい方</li>
-                <li>セクターローテーションの波に乗って安定感を重視したい方</li>
-            </ul>
-        </div>
-        <!-- 戦略2 -->
-        <div class="strategy-card alt">
-            <h3>⚡ 【高スコア・モメンタム急増】アプローチ</h3>
-            <p><b>考え方:</b> 52週高値から大幅に下落した大底圏（-30%以下）にあり、かつ本日の出来高が急増している銘柄をスコアリングで多角的に抽出する方法。</p>
-            <p><b>こんな方におすすめ:</b></p>
-            <ul>
-                <li>底打ちからの急反発（リバウンド）による大きな値幅や短期的な利益を狙いたい方</li>
-                <li>話題性や出来高の勢い（モメンタム）を重視したダイナミックなトレードが好きな方</li>
-            </ul>
-        </div>
-    </div>
 
-    <h2>📋 本日のスクリーニング＆指値結果一覧</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>銘柄コード</th>
-                <th>業種</th>
-                <th>検証区分</th>
-                <th>おすすめ度(%)</th>
-                <th>買い指値</th>
-                <th>利確目標 (TP+10%)</th>
-                <th>損切ライン (SL-5%)</th>
-                <th>出来高倍率</th>
-            </tr>
-        </thead>
-        <tbody>
-"""
+def build_html(df, as_of):
+    from web_common import page_head, page_foot
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    strong = _pick_strong(df) if not df.empty else pd.DataFrame()
 
-    if not df.empty:
-        for _, row in df.iterrows():
-            is_main = "本命" in str(row.get("区分", ""))
-            badge_class = "badge-main" if is_main else "badge-sub"
-            html_content += f"""
-            <tr>
-                <td class="price"><b>{row.get("銘柄コード", "")}</b></td>
-                <td>{row.get("業種", "")}</td>
-                <td><span class="{badge_class}">{row.get("区分", "")}</span></td>
-                <td>{row.get("おすすめ度(%)", "")}%</td>
-                <td class="price">¥{row.get("買い指値", 0):,.1f}</td>
-                <td class="price" style="color: #28a745;">¥{row.get("利確目標(TP+10%)", 0):,.1f}</td>
-                <td class="price" style="color: #dc3545;">¥{row.get("損切ライン(SL-5%)", 0):,.1f}</td>
-                <td>{row.get("出来高倍率", 0)}x</td>
-            </tr>
-            """
+    parts = []
+    parts.append(page_head("今日の運用候補", "index.html"))
+    parts.append(f'<h1>今日の株式運用候補</h1>')
+    parts.append(f'<div class="meta">データ時点: {_esc(as_of)} ／ 生成: {now}</div>')
+
+    # 運用サマリー
+    parts.append('<h1>★ 特に有力な候補</h1>')
+    if strong.empty:
+        parts.append('<div class="none">本日は、実績・リスクの条件を満たす'
+                     '「特に有力」な候補はありません。無理に買う必要はありません。</div>')
     else:
-        html_content += """
-            <tr>
-                <td colspan="8" style="text-align: center; color: #6c757d; padding: 30px;">本日の条件を満たす銘柄はありません。</td>
-            </tr>
-        """
+        for _, r in strong.head(5).iterrows():
+            close = r.get("終値")
+            name = _esc(r.get("銘柄名", ""))
+            code = _esc(r.get("code", ""))
+            sec = _esc(r.get("業種", ""))
+            if close and close == close:
+                entry = float(close)
+                stop = entry * (1 + STOP_PCT / 100)
+                target = entry * (1 + TARGET_PCT / 100)
+                parts.append(f"""<div class="card strong">
+<div class="name">{name} <span class="sec">（{code}）{sec}</span></div>
+<div class="price">買い指値 <b>{entry:,.1f}円</b>（現値）<br>
+  <span class="target">売り/利確 {target:,.1f}円(+10%)</span> ／
+  <span class="stop">損切り {stop:,.1f}円(-5%)</span></div>
+<div class="stat">過去: 平均(損切5%){r.get('平均_損切5%'):+.2f}% ／
+  2週で+10%到達 {r.get('2週で+10%到達%','?')}% ／
+  -5%到達 {r.get('2週で-5%到達%','?')}% ／ n{r.get('過去該当n')}</div>
+</div>""")
 
-    html_content += f"""
-        </tbody>
-    </table>
-    <footer style="margin-top: 30px; text-align: center; color: #6c757d; font-size: 0.9em;">
-        &copy; 2026 YouTubabaa / 株式投資自動スクリーニングシステム
-    </footer>
-</body>
-</html>
-"""
+    # 候補一覧テーブル（各銘柄に買い指値・利確・損切りも表示）
+    if not df.empty:
+        parts.append(f'<h1>候補一覧（{len(df)}件）</h1>')
+        parts.append('<p style="font-size:12px;color:#667;">各銘柄の買い指値（現値）と、'
+                     'そこから利確+10%・損切り-5%の目安価格です。表の列名タップで並び替え。</p>')
+        cols = [("銘柄名", "銘柄"), ("業種", "業種"), ("高値からの下落%", "下落%"),
+                ("売買代金(3日平均)億", "代金億"),
+                ("買い指値", "買い指値"), ("利確", "利確+10%"), ("損切り", "損切り-5%"),
+                ("権利付最終日", "配当:権利付最終日"), ("100株配当", "100株配当"),
+                ("信用買い残", "信用買残"), ("信用売り残", "信用売残"), ("信用倍率", "信用倍率"),
+                ("業種空売り比率", "業種空売り比"),
+                ("平均_損切5%", "平均(損5)"), ("2週で+10%到達%", "+10到達"),
+                ("2週で-5%到達%", "-5到達"), ("過去該当n", "n")]
+        # 各行に指値・利確・損切りを計算して持たせる
+        df = df.copy()
+        close_col = df["終値"] if "終値" in df.columns else None
+        if close_col is not None:
+            df["買い指値"] = close_col.round(1)
+            df["利確"] = (close_col * (1 + TARGET_PCT/100)).round(1)
+            df["損切り"] = (close_col * (1 + STOP_PCT/100)).round(1)
+        cols = [(c, lbl) for c, lbl in cols if c in df.columns]
+        thead = "".join(f"<th>{_esc(lbl)}</th>" for _, lbl in cols)
+        rows = []
+        for _, r in df.iterrows():
+            cells = []
+            for c, _ in cols:
+                v = r.get(c, "")
+                # 利確は緑、損切りは赤で色分け
+                if c == "利確":
+                    cells.append(f'<td class="target">{_esc(v)}</td>')
+                elif c == "損切り":
+                    cells.append(f'<td class="stop">{_esc(v)}</td>')
+                else:
+                    cells.append(f"<td>{_esc(v)}</td>")
+            rows.append(f"<tr>{''.join(cells)}</tr>")
+        parts.append(f'<div class="tablewrap"><table><thead><tr>{thead}</tr></thead>'
+                     f"<tbody>{''.join(rows)}</tbody></table></div>")
 
-    # docs ディレクトリを作成してその中に index.html を出力する
-    os.makedirs("docs", exist_ok=True)
-    out_html = os.path.join("docs", "index.html")
-    with open(out_html, "w", encoding="utf-8") as f:
-        f.write(html_content)
-    print(f"  Webレポートを docs/ に生成しました: {out_html}")
+    note = ('<div class="note">'
+            '※ 「特に有力」= 過去該当n≧30・平均(損切5%)プラス・+10%到達≧-5%到達 を満たすもの。'
+            '損切り-5%・利確+10%は検証で用いた目安。<br>'
+            '※ 配当の「権利付最終日」「100株配当」はyfinance(Yahoo Finance)由来の参考値です。'
+            '非公式データで、祝日を考慮しない概算のため、<b>正確な日付・金額は必ず証券会社や企業IRで'
+            'ご確認ください</b>。100株配当は直近1回分×100で、次回も同額とは限りません。</div>')
+    parts.append(page_foot(note))
+    return "".join(parts)
+
 
 def main():
-    generate_web_report()
+    from sources import JQuants, JST
+    jq = JQuants()
+    print("データを読み込み中...")
+    # 通常はデータを限界まで使う（分析の質・勝率を優先）。data/ をキャッシュして差分取得。
+    # ただし初回はキャッシュが無くフル取得が重い。環境変数 LIGHT_MODE=1 のときは
+    # 期間を絞って軽く取得し、まずキャッシュを作る（初回のタイムアウト回避用）。
+    # 初回のキャッシュ作成を確実にするため、当面は軽量モードを既定にする。
+    # 環境変数 LIGHT_MODE=0 を明示したときだけフル取得する。
+    # （キャッシュができたら、web.yml で LIGHT_MODE=0 に変えてフルに戻せる）
+    _lm = os.environ.get("LIGHT_MODE", "").strip().lower()
+    light = _lm not in ("0", "false", "no")   # 空・未設定・1・true はすべて軽量
+    if light:
+        print("  [LIGHT_MODE] 軽量取得（期間短縮）でキャッシュを作成/更新します", flush=True)
+        quote_days, fin_days, sd_days = 400, 400, 60
+    else:
+        print("  [FULLモード] データを限界まで取得します", flush=True)
+        quote_days = fin_days = sd_days = config.BACKTEST_LOOKBACK_DAYS
+    quotes = jq.quotes(quote_days)
+    print(f"  株価取得完了: {len(quotes):,}行", flush=True)
+    fin = jq.financials(fin_days)
+    print(f"  決算取得完了: {len(fin):,}行", flush=True)
+    listed = jq.listed()
+    print(f"  銘柄取得完了: {len(listed):,}件", flush=True)
+    try:
+        margin = jq.margin(sd_days)
+        print(f"  信用残取得完了: {len(margin):,}行", flush=True)
+    except Exception as e:
+        print(f"  信用残スキップ: {e}", flush=True)
+        margin = None
+    try:
+        short_ratio = jq.short_ratio(sd_days)
+        print(f"  空売り比率取得完了: {len(short_ratio):,}行", flush=True)
+    except Exception as e:
+        print(f"  空売り比率スキップ: {e}", flush=True)
+        short_ratio = None
+
+    df, as_of = find_best(quotes, fin, listed, margin=margin, short_ratio=short_ratio)
+
+    # 候補銘柄の配当情報（権利付最終日・100株配当）をyfinanceから取得して付与。
+    # 非公式データなので、失敗しても候補表示は続行する（空欄になるだけ）。
+    if not df.empty and "code" in df.columns:
+        try:
+            import dividends
+            div = dividends.fetch_dividends(df["code"].astype(str).tolist())
+            df["権利付最終日"] = df["code"].astype(str).map(
+                lambda c: div.get(c, {}).get("権利付最終日", ""))
+            df["100株配当"] = df["code"].astype(str).map(
+                lambda c: div.get(c, {}).get("100株配当", ""))
+        except Exception as e:
+            print(f"  [配当] 取得スキップ: {e}", flush=True)
+
+    html_str = build_html(df, as_of)
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    path = os.path.join(OUT_DIR, "index.html")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html_str)
+    print(f"HTMLレポートを生成しました: {path}")
+    print(f"候補 {len(df)}件 / データ時点 {as_of}")
+
+    # 推奨を履歴に記録し、その後の結果を追跡して実績ページを生成
+    import track_picks
+    strong = _pick_strong(df) if not df.empty else df
+    track_picks.record_picks(strong, as_of)
+    res = track_picks.build_and_save_results(quotes)
+    n_rec = len(res) if res is not None else 0
+    print(f"推奨の実績ページを生成しました: results.html（記録 {n_rec}件）")
+
+    # 追加の研究ページ（業種別成績・市場の状況・検証の記録）
+    import web_extras
+    made = web_extras.build_and_save_extras(quotes, listed, res)
+    print(f"追加ページを生成しました: {', '.join(made)}")
+
 
 if __name__ == "__main__":
     main()

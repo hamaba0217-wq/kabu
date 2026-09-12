@@ -31,7 +31,7 @@ TARGET_PCT = 10.0     # 利確
 STOP_PCT = -5.0       # 損切り
 HIST_DIR = "history"
 HIST_FILE = os.path.join(HIST_DIR, "picks.csv")
-OUT_DIR = "docs"
+OUT_DIR = "."
 
 
 def record_picks(strong_df, as_of):

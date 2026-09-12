@@ -17,7 +17,7 @@ import pandas as pd
 
 from web_common import page_head, page_foot
 
-OUT_DIR = "docs"
+OUT_DIR = "."
 
 
 def _esc(v):
