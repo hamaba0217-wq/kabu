@@ -68,6 +68,44 @@ def record_picks(strong_df, as_of):
     merged.to_csv(HIST_FILE, index=False, encoding="utf-8-sig")
 
 
+def record_from_orders(orders_df, as_of):
+    """daily_morning_routine の推奨CSV形式（銘柄コード/企業名/業種/買い指値/…/区分）を
+    履歴 history/picks.csv に追記する。同じ推奨日×codeは重複させない。"""
+    if orders_df is None or len(orders_df) == 0:
+        return
+    os.makedirs(HIST_DIR, exist_ok=True)
+    as_of_str = str(pd.Timestamp(as_of).date())
+    rows = []
+    for _, r in orders_df.iterrows():
+        try:
+            entry = float(r.get("買い指値"))
+        except (TypeError, ValueError):
+            continue
+        if not (entry == entry):  # NaN 除外
+            continue
+        rows.append({
+            "推奨日": as_of_str,
+            "code": str(r.get("銘柄コード", "")),
+            "銘柄名": r.get("企業名", ""),
+            "業種": r.get("業種", ""),
+            "区分": r.get("区分", ""),
+            "買い指値": round(entry, 1),
+            "利確": round(entry * (1 + TARGET_PCT / 100), 1),
+            "損切り": round(entry * (1 + STOP_PCT / 100), 1),
+        })
+    if not rows:
+        return
+    new = pd.DataFrame(rows)
+    if os.path.exists(HIST_FILE):
+        old = pd.read_csv(HIST_FILE, dtype={"code": str})
+        merged = pd.concat([old, new], ignore_index=True)
+        merged = merged.drop_duplicates(subset=["推奨日", "code"], keep="first")
+    else:
+        merged = new
+    merged.to_csv(HIST_FILE, index=False, encoding="utf-8-sig")
+    print(f"  履歴に記録: {len(rows)}件（{as_of_str}） → {HIST_FILE}")
+
+
 def track(quotes):
     """履歴の各推奨を、その後の株価で追跡し結果を付ける。
     quotes: 分割調整済みの株価（code, date, close）。"""

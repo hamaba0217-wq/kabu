@@ -74,15 +74,17 @@ def run_morning_routine():
     # 最新日の候補を抽出
     today_df = qi[qi["date"] == latest_date].copy()
     valid_mask = today_df["is_bottom"] & today_df["is_vol_surge"] & today_df["is_range_wide"] & today_df["is_good_regime"]
-    candidates = today_df[valid_mask].sort_values("vol_ratio", ascending=False)
+    # おすすめ度（スコア）の高い順に TOP8 のみ
+    candidates = today_df[valid_mask].sort_values("recommendation_score_%", ascending=False).head(8)
 
     if len(candidates) == 0:
         print("本日の条件を満たす銘柄はありません。基準日記録用CSVを出力します。")
         os.makedirs(config.OUTPUT_DIR, exist_ok=True)
         today_str = latest_date.date().isoformat()
         out_csv = os.path.join(config.OUTPUT_DIR, f"{today_str}_morning_orders.csv")
-        pd.DataFrame(columns=["銘柄コード","企業名","業種","区分","おすすめ度(%)","買い指値","利確目標(TP+10%)","損切ライン(SL-5%)","出来高倍率"]).to_csv(out_csv, index=False, encoding="utf-8-sig")
-        return
+        empty = pd.DataFrame(columns=["銘柄コード","企業名","業種","区分","おすすめ度(%)","買い指値","利確目標(TP+10%)","損切ライン(SL-5%)","出来高倍率"])
+        empty.to_csv(out_csv, index=False, encoding="utf-8-sig")
+        return empty, quotes, latest_date
 
     # 勝率55%以上の高勝率セクター
     target_sectors = ['パルプ・紙', '倉庫･運輸関連業', '海運業', '石油･石炭製品', '証券･商品先物取引業', '鉄鋼', '銀行業']
@@ -123,6 +125,7 @@ def run_morning_routine():
     print(f"\n抽出された推奨銘柄数: {len(df_res)} 件")
     print(df_res.to_string(index=False))
     print(f"\n指値プランをCSVに出力しました: {out_csv}")
+    return df_res, quotes, latest_date
 
 if __name__ == "__main__":
     run_morning_routine()
