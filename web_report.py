@@ -267,21 +267,31 @@ def _build_index(df, target_date, quotes=None):
             by_code = {code: g for code, g in qs.groupby("code")}
             cards = []
             for _, r in df.iterrows():
-                code = str(r["銘柄コード"])
-                dfc = by_code.get(code)
-                if dfc is None:
-                    dfc = by_code.get(code[:4]) or by_code.get(code + "0")
-                svg = _candles_svg(dfc, buy=r.get("買い指値"),
-                                   tp=r.get("利確目標(TP+10%)"), sl=r.get("損切ライン(SL-5%)"))
-                cards.append(
-                    '<div class="chart-card">'
-                    f'<div class="ttl">{_esc(r["企業名"])} <span style="color:#999">({_esc(code)})</span></div>'
-                    f'<div class="sub">{_esc(r["業種"])}｜{_esc(r["区分"])}</div>'
-                    f'{svg}'
-                    f'<div class="px"><b>買い {r["買い指値"]:,}円</b>　'
-                    f'<span class="tp">利確 {r["利確目標(TP+10%)"]:,}円</span>　'
-                    f'<span class="sl">損切 {r["損切ライン(SL-5%)"]:,}円</span></div>'
-                    '</div>')
+                try:
+                    code = str(r["銘柄コード"])
+                    dfc = by_code.get(code)
+                    if dfc is None:
+                        dfc = by_code.get(code[:4])
+                    if dfc is None:
+                        dfc = by_code.get(code + "0")
+                    svg = _candles_svg(dfc, buy=r.get("買い指値"),
+                                       tp=r.get("利確目標(TP+10%)"), sl=r.get("損切ライン(SL-5%)"))
+                    def _yen(v):
+                        try:
+                            return f"{float(v):,.1f}円"
+                        except (TypeError, ValueError):
+                            return f"{_esc(v)}円"
+                    cards.append(
+                        '<div class="chart-card">'
+                        f'<div class="ttl">{_esc(r["企業名"])} <span style="color:#999">({_esc(code)})</span></div>'
+                        f'<div class="sub">{_esc(r.get("業種",""))}｜{_esc(r.get("区分",""))}</div>'
+                        f'{svg}'
+                        f'<div class="px"><b>買い {_yen(r.get("買い指値"))}</b>　'
+                        f'<span class="tp">利確 {_yen(r.get("利確目標(TP+10%)"))}</span>　'
+                        f'<span class="sl">損切 {_yen(r.get("損切ライン(SL-5%)"))}</span></div>'
+                        '</div>')
+                except Exception as e:
+                    cards.append(f'<div class="chart-card"><div class="chart-none">チャート生成エラー: {_esc(e)}</div></div>')
             body.append(f'<div class="chart-grid">{"".join(cards)}</div>')
         else:
             body.append('<div class="chart-none">チャート用の株価データがありません'
@@ -371,8 +381,14 @@ def generate_web_report(df=None, quotes=None, target_date=None):
         target_date = str(pd.Timestamp(target_date).date()) if not isinstance(target_date, str) else target_date
 
     # index.html
+    try:
+        html_index = _build_index(df, target_date, quotes=quotes)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        html_index = _page("今日の株式運用候補", "index",
+                           f'<h1>今日の株式運用候補</h1><div class="no-data">生成中にエラー: {_esc(e)}</div>')
     with open(os.path.join(DOCS, "index.html"), "w", encoding="utf-8") as f:
-        f.write(_build_index(df, target_date, quotes=quotes))
+        f.write(html_index)
     print(f"  docs/index.html を生成しました")
 
     # results.html（追跡）— quotes があるときだけ最新まで追跡。無くても既存履歴で生成
@@ -400,11 +416,21 @@ def main():
         ret = run_morning_routine()
         if isinstance(ret, tuple):
             df, quotes, target_date = (list(ret) + [None, None, None])[:3]
+    except SystemExit as e:
+        # JQuants() はAPIキー未設定/ネット中断で SystemExit を投げる。
+        # ここで握りつぶし、Webページ生成は必ず継続する（ジョブを赤くしない）。
+        print(f"スクリーニング中断（APIキー/通信など）: {e}")
     except Exception as e:
+        import traceback; traceback.print_exc()
         print(f"スクリーニング実行エラー: {e}")
 
     print(">>> 2. WebレポートHTML生成中（index.html・results.html）...")
-    generate_web_report(df=df, quotes=quotes, target_date=target_date)
+    try:
+        generate_web_report(df=df, quotes=quotes, target_date=target_date)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        print(f"Web生成エラー: {e}")
+    print(">>> 完了（ジョブは正常終了）")
 
 
 if __name__ == "__main__":
