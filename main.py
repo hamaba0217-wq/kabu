@@ -101,7 +101,13 @@ import targets
 import technical
 import validate
 import validate_oversold
-from sources import JQuants, fetch_large_holdings, JST
+from sources import JQuants, JST
+try:
+    from sources import fetch_large_holdings  # EDINET大株主（現在は不使用）
+except ImportError:
+    def fetch_large_holdings(*args, **kwargs):  # フォールバック
+        import pandas as _pd
+        return _pd.DataFrame()
 
 
 def cmd_inspect() -> None:

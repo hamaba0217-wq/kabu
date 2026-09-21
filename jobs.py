@@ -29,7 +29,13 @@ import fundamentals
 import mailer
 import regime
 import screen
-from sources import JQuants, JST, code4, fetch_disclosures
+from sources import JQuants, JST, code4
+try:
+    from sources import fetch_disclosures  # TDnet開示（Standardプランでは未提供の場合あり）
+except ImportError:
+    def fetch_disclosures(*args, **kwargs):  # フォールバック（開示APIが無い環境）
+        import pandas as _pd
+        return _pd.DataFrame()
 
 HISTORY_DIR = "history"
 
