@@ -70,7 +70,11 @@ def run_morning_routine():
     candidates = today_df[valid_mask].sort_values("vol_ratio", ascending=False)
 
     if len(candidates) == 0:
-        print("本日の条件を満たす銘柄はありません。")
+        print("本日の条件を満たす銘柄はありません。基準日記録用CSVを出力します。")
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        today_str = latest_date.date().isoformat()
+        out_csv = os.path.join(config.OUTPUT_DIR, f"{today_str}_morning_orders.csv")
+        pd.DataFrame(columns=["銘柄コード","業種","区分","おすすめ度(%)","買い指値","利確目標(TP+10%)","損切ライン(SL-5%)","出来高倍率"]).to_csv(out_csv, index=False, encoding="utf-8-sig")
         return
 
     # 勝率55%以上の高勝率セクター

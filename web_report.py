@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-web_report.py - 毎朝の自動実行スクリプト
-1. daily_morning_routine を実行して最新のスクリーニング・指値プランCSVを出力
-2. そのCSVから docs/index.html を生成してWebサイトを更新する
+web_report.py
+1. daily_morning_routine を実行（0件でも必ず最新日付でCSVを生成）
+2. docs/index.html を生成・更新
 """
 from __future__ import annotations
 import os
@@ -24,11 +24,12 @@ def generate_web_report():
     files = glob.glob(pattern)
 
     df = pd.DataFrame()
-    target_date = "データなし"
+    target_date = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date().isoformat()
+
     if files:
         latest_file = max(files, key=os.path.getmtime)
-        target_date = os.path.basename(latest_file).split("_")[0]
         try:
+            target_date = os.path.basename(latest_file).split("_")[0]
             df = pd.read_csv(latest_file)
             print(f"  最新の指値CSVを読み込みました: {latest_file} (件数: {len(df)})")
         except Exception as e:
@@ -137,7 +138,7 @@ def generate_web_report():
     else:
         html_content += """
     <div class="no-data">
-        <p>本日の条件を満たす銘柄はありません。</p>
+        <p>本日の厳しい基準（高値-30%超・出来高急増）を満たす銘柄はありませんでした。</p>
     </div>
 """
 
