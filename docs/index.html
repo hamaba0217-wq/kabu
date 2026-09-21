@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>今日の株式運用候補 ＆ 指値プラン・検証手法別おすすめ</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: #f8f9fa; color: #333; line-height: 1.6; }
@@ -9,46 +10,49 @@
         h2 { color: #2c3e50; margin-top: 30px; font-size: 1.3em; border-left: 4px solid #1a73e8; padding-left: 10px; }
         .date-badge { background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 4px; font-weight: bold; display: inline-block; margin-bottom: 20px; }
         
-        /* 検証手法ごとの解説カード */
         .strategy-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .strategy-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 20px; border-top: 4px solid #1a73e8; }
         .strategy-card.alt { border-top-color: #28a745; }
         .strategy-card h3 { margin-top: 0; color: #1a73e8; font-size: 1.1em; }
         .strategy-card.alt h3 { color: #28a745; }
-        .strategy-card p { margin: 8px 0; font-size: 0.95em; color: #555; }
-        .strategy-card ul { padding-left: 20px; margin: 8px 0; font-size: 0.92em; color: #444; }
-
-        /* テーブルスタイル */
-        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 6px; overflow: hidden; margin-top: 10px; }
-        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #dee2e6; }
-        th { background: #1a73e8; color: white; font-weight: 600; }
-        tr:hover { background: #f1f3f5; }
-        .badge-main { background: #28a745; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
-        .badge-sub { background: #6c757d; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; }
-        .price { font-family: monospace; font-weight: bold; }
+        .strategy-card p { font-size: 0.9em; margin-bottom: 10px; }
+        .strategy-card ul { font-size: 0.85em; padding-left: 20px; color: #555; }
+        
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-top: 15px; font-size: 0.9em; }
+        th, td { padding: 12px 15px; text-align: center; border-bottom: 1px solid #eee; }
+        th { background: #1a73e8; color: #fff; font-weight: 600; white-space: nowrap; }
+        tr:hover { background: #f1f3f4; }
+        
+        .badge-main { background: #e8f0fe; color: #1a73e8; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+        .badge-sub { background: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+        
+        .price-buy { font-weight: bold; color: #2c3e50; }
+        .price-tp { font-weight: bold; color: #137333; }
+        .price-sl { font-weight: bold; color: #d93025; }
+        .no-data { text-align: center; padding: 40px; color: #666; background: #fff; border-radius: 8px; }
+        footer { margin-top: 40px; text-align: center; font-size: 0.8em; color: #888; }
     </style>
 </head>
 <body>
+
     <h1>今日の株式運用候補 ＆ 指値プラン</h1>
-    <div class="date-badge">基準日: データなし</div>
+    <div class="date-badge">基準日: 2026-09-21</div>
 
     <h2>💡 検証方法・アプローチ別の特徴とおすすめ</h2>
     <div class="strategy-container">
-        <!-- 戦略1 -->
         <div class="strategy-card">
             <h3>📈 【本命セクター重視】アプローチ</h3>
-            <p><b>考え方:</b> 過去のバックテストデータから「勝率55%以上」が実証されている高勝率セクター（海運、銀行、パルプ・紙など）に資金を集中させる方法。</p>
-            <p><b>こんな方におすすめ:</b></p>
+            <p><strong>考え方:</strong> 過去のバックテストデータから「勝率55%以上」が実証されている高勝率セクター（海運、銀行、パルプ・紙など）に資金を集中させる方法。</p>
+            <p><strong>こんな方におすすめ:</strong></p>
             <ul>
                 <li>相場全体のトレンドに逆らわず、確率的に優位な業種から手堅くリターンを狙いたい方</li>
                 <li>セクターローテーションの波に乗って安定感を重視したい方</li>
             </ul>
         </div>
-        <!-- 戦略2 -->
         <div class="strategy-card alt">
             <h3>⚡ 【高スコア・モメンタム急増】アプローチ</h3>
-            <p><b>考え方:</b> 52週高値から大幅に下落した大底圏（-30%以下）にあり、かつ本日の出来高が急増している銘柄をスコアリングで多角的に抽出する方法。</p>
-            <p><b>こんな方におすすめ:</b></p>
+            <p><strong>考え方:</strong> 52週高値から大幅に下落した大底圏（-30%以下）にあり、かつ本日の出来高が急増している銘柄をスコアリングで多角的に抽出する方法。</p>
+            <p><strong>こんな方におすすめ:</strong></p>
             <ul>
                 <li>底打ちからの急反発（リバウンド）による大きな値幅や短期的な利益を狙いたい方</li>
                 <li>話題性や出来高の勢い（モメンタム）を重視したダイナミックなトレードが好きな方</li>
@@ -57,6 +61,7 @@
     </div>
 
     <h2>📋 本日のスクリーニング＆指値結果一覧</h2>
+
     <table>
         <thead>
             <tr>
@@ -73,13 +78,153 @@
         <tbody>
 
             <tr>
-                <td colspan="8" style="text-align: center; color: #6c757d; padding: 30px;">本日の条件を満たす銘柄はありません。</td>
+                <td><strong>87980</strong></td>
+                <td>保険業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>93.2%</strong></td>
+                <td class="price-buy">174.0 円</td>
+                <td class="price-tp">+191.4 円</td>
+                <td class="price-sl">-165.3 円</td>
+                <td>15.56 倍</td>
             </tr>
-        
+
+            <tr>
+                <td><strong>44460</strong></td>
+                <td>情報･通信業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>89.3%</strong></td>
+                <td class="price-buy">795.0 円</td>
+                <td class="price-tp">+874.5 円</td>
+                <td class="price-sl">-755.2 円</td>
+                <td>7.67 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>41960</strong></td>
+                <td>情報･通信業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>82.2%</strong></td>
+                <td class="price-buy">1,336.0 円</td>
+                <td class="price-tp">+1,469.6 円</td>
+                <td class="price-sl">-1,269.2 円</td>
+                <td>7.62 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>88940</strong></td>
+                <td>不動産業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>89.8%</strong></td>
+                <td class="price-buy">17.0 円</td>
+                <td class="price-tp">+18.7 円</td>
+                <td class="price-sl">-16.1 円</td>
+                <td>5.24 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>27620</strong></td>
+                <td>小売業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>67.6%</strong></td>
+                <td class="price-buy">71.0 円</td>
+                <td class="price-tp">+78.1 円</td>
+                <td class="price-sl">-67.5 円</td>
+                <td>4.11 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>94170</strong></td>
+                <td>情報･通信業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>64.3%</strong></td>
+                <td class="price-buy">327.0 円</td>
+                <td class="price-tp">+359.7 円</td>
+                <td class="price-sl">-310.6 円</td>
+                <td>4.02 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>57210</strong></td>
+                <td>非鉄金属</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>83.2%</strong></td>
+                <td class="price-buy">54.0 円</td>
+                <td class="price-tp">+59.4 円</td>
+                <td class="price-sl">-51.3 円</td>
+                <td>3.56 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>64330</strong></td>
+                <td>機械</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>69.6%</strong></td>
+                <td class="price-buy">1,331.0 円</td>
+                <td class="price-tp">+1,464.1 円</td>
+                <td class="price-sl">-1,264.5 円</td>
+                <td>3.26 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>70630</strong></td>
+                <td>サービス業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>80.3%</strong></td>
+                <td class="price-buy">62.0 円</td>
+                <td class="price-tp">+68.2 円</td>
+                <td class="price-sl">-58.9 円</td>
+                <td>3.19 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>44380</strong></td>
+                <td>情報･通信業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>69.0%</strong></td>
+                <td class="price-buy">302.0 円</td>
+                <td class="price-tp">+332.2 円</td>
+                <td class="price-sl">-286.9 円</td>
+                <td>3.15 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>87460</strong></td>
+                <td>証券･商品先物取引業</td>
+                <td><span class="badge-main">【本命】高勝率セクター</span></td>
+                <td><strong>85.9%</strong></td>
+                <td class="price-buy">108.0 円</td>
+                <td class="price-tp">+118.8 円</td>
+                <td class="price-sl">-102.6 円</td>
+                <td>2.99 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>40470</strong></td>
+                <td>化学</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>65.9%</strong></td>
+                <td class="price-buy">2,343.0 円</td>
+                <td class="price-tp">+2,577.3 円</td>
+                <td class="price-sl">-2,225.8 円</td>
+                <td>2.48 倍</td>
+            </tr>
+
+            <tr>
+                <td><strong>52550</strong></td>
+                <td>情報･通信業</td>
+                <td><span class="badge-sub">【参考】高スコア銘柄</span></td>
+                <td><strong>66.5%</strong></td>
+                <td class="price-buy">78.0 円</td>
+                <td class="price-tp">+85.8 円</td>
+                <td class="price-sl">-74.1 円</td>
+                <td>2.02 倍</td>
+            </tr>
+
         </tbody>
     </table>
-    <footer style="margin-top: 30px; text-align: center; color: #6c757d; font-size: 0.9em;">
-        &copy; 2026 YouTubabaa / 株式投資自動スクリーニングシステム
+
+    <footer>
+        <p>© 2026 YouTubabaa / 株式投資自動スクリーニングシステム</p>
     </footer>
 </body>
 </html>
