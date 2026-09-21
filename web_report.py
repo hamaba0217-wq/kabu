@@ -30,8 +30,8 @@ BASE_STYLE = """
     .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
     h1 { color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; font-size: 1.5em; }
     h2 { color: #2c3e50; margin-top: 26px; font-size: 1.2em; border-left: 4px solid #1a73e8; padding-left: 10px; }
-    .nav { display: flex; gap: 8px; background: #1a73e8; padding: 10px 16px; position: sticky; top: 0; z-index: 10; }
-    .nav a { color: #fff; text-decoration: none; font-weight: 600; font-size: 0.95em; padding: 6px 12px; border-radius: 6px; }
+    .nav { display: flex; flex-wrap: wrap; gap: 6px; background: #1a73e8; padding: 8px 12px; position: sticky; top: 0; z-index: 10; }
+    .nav a { color: #fff; text-decoration: none; font-weight: 600; font-size: 0.9em; padding: 6px 10px; border-radius: 6px; }
     .nav a.active { background: rgba(255,255,255,0.25); }
     .nav a:hover { background: rgba(255,255,255,0.15); }
     .date-badge { background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 4px; font-weight: bold; display: inline-block; margin-bottom: 20px; }
@@ -189,6 +189,7 @@ def _nav(active):
         return ' class="active"' if p == active else ""
     return (f'<div class="nav">'
             f'<a href="index.html"{cls("index")}>📋 今日の候補</a>'
+            f'<a href="recent.html"{cls("recent")}>🗓 過去10日の推奨</a>'
             f'<a href="results.html"{cls("results")}>📈 推奨のその後（実績）</a>'
             f'</div>')
 
@@ -234,6 +235,9 @@ def _build_index(df, target_date, quotes=None):
             '<h2>📋 本日のスクリーニング＆指値結果一覧</h2>']
 
     if df is not None and not df.empty:
+        body.append('<p class="legend">売買代金5億円以上からスコア上位8銘柄を表示'
+                    '（<b>【本命】条件クリア</b>＝高値-30%超×出来高急増×値幅大×地合い良、を優先）。'
+                    '指値・利確・損切りは目安、投資助言ではありません。</p>')
         head = ["銘柄コード","企業名","業種","検証区分","おすすめ度(%)","買い指値","利確目標 (TP+10%)","損切ライン (SL-5%)","出来高倍率"]
         thead = "".join(f'<th data-sortable>{_esc(h)}</th>' for h in head)
         rows = []
@@ -297,7 +301,9 @@ def _build_index(df, target_date, quotes=None):
             body.append('<div class="chart-none">チャート用の株価データがありません'
                         '（クラウドの毎朝実行で表示されます）。</div>')
     else:
-        body.append('<div class="no-data"><p>本日の基準（高値-30%超・出来高急増）を満たす銘柄はありませんでした。</p></div>')
+        body.append('<div class="no-data"><p>本日は候補を表示できませんでした'
+                    '（株価データ未取得、または売買代金5億円以上の銘柄が抽出できませんでした）。'
+                    '翌営業日の自動実行で更新されます。</p></div>')
 
     return _page("今日の株式運用候補 ＆ 指値プラン", "index", "\n".join(body))
 
@@ -354,6 +360,62 @@ def _build_results(tracked):
     return _page("推奨のその後（実績）", "results", "\n".join(body))
 
 
+def _build_recent(tracked, days=10):
+    """直近10営業日分（推奨日ベース）の推奨を、日付ごとにまとめて表示。実データのみ。"""
+    now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
+    body = ['<h1>🗓 過去10日の推奨</h1>',
+            f'<div class="date-badge">更新: {now}</div>']
+
+    if tracked is None or tracked.empty:
+        body.append('<div class="no-data"><p>まだ記録がありません。'
+                    '毎朝の実行で推奨が記録され、直近10営業日分がここに表示されます。</p></div>')
+        return _page("過去10日の推奨", "recent", "\n".join(body))
+
+    t = tracked.copy()
+    t["推奨日"] = t["推奨日"].astype(str)
+    recent_dates = sorted(t["推奨日"].unique(), reverse=True)[:days]
+    t = t[t["推奨日"].isin(recent_dates)]
+
+    # 全体サマリ（この10日分）
+    done = t[t["結果"].isin(["利確+10%到達", "損切り-5%到達"])]
+    n_done = len(done); n_win = int((done["結果"] == "利確+10%到達").sum())
+    wr = f"{n_win / n_done * 100:.0f}%" if n_done else "—"
+    body.append(f'<div class="card">直近{len(recent_dates)}営業日の推奨: <b>{len(t)}件</b>／'
+                f'結果確定: <b>{n_done}件</b>（利確 {n_win}・損切り {n_done - n_win}、勝率 <b>{wr}</b>）</div>')
+
+    def num(v):
+        return "" if v is None or (isinstance(v, float) and v != v) else v
+
+    for d in recent_dates:
+        g = t[t["推奨日"] == d]
+        body.append(f'<h2>{_esc(d)}（{len(g)}件）</h2>')
+        head = ["銘柄名", "区分", "買い指値", "利確", "損切り", "最新時点%", "最大%", "最小%", "結果"]
+        thead = "".join(f'<th data-sortable>{_esc(h)}</th>' for h in head)
+        rows = []
+        for _, r in g.iterrows():
+            res = str(r["結果"])
+            cls = "win" if "利確" in res else ("lose" if "損切り" in res else "track")
+            rows.append(
+                "<tr>"
+                f'<td>{_esc(r["銘柄名"])}<br><span style="color:#999;font-size:0.85em">{_esc(r["code"])}</span></td>'
+                f'<td>{_esc(r.get("区分", ""))}</td>'
+                f'<td data-v="{r["買い指値"]}">{r["買い指値"]:,.1f}</td>'
+                f'<td data-v="{r["利確"]}">{r["利確"]:,.1f}</td>'
+                f'<td data-v="{r["損切り"]}">{r["損切り"]:,.1f}</td>'
+                f'<td data-v="{num(r.get("最新時点%"))}">{_esc(num(r.get("最新時点%")))}</td>'
+                f'<td data-v="{num(r.get("現在まで最大%"))}">{_esc(num(r.get("現在まで最大%")))}</td>'
+                f'<td data-v="{num(r.get("現在まで最小%"))}">{_esc(num(r.get("現在まで最小%")))}</td>'
+                f'<td><span class="{cls}">{_esc(res)}</span></td>'
+                "</tr>")
+        body.append(f'<div class="tablewrap"><table><thead><tr>{thead}</tr></thead>'
+                    f'<tbody>{"".join(rows)}</tbody></table></div>')
+
+    body.append('<div class="note">※ 買い指値＝推奨日の終値。翌日約定と仮定した実データ追跡。'
+                '利確+10%・損切り-5%は終値ベース、到達順で先に来たほうを結果とします。'
+                '手数料・スリッページ未考慮・投資助言ではありません。</div>')
+    return _page("過去10日の推奨", "recent", "\n".join(body))
+
+
 def generate_web_report(df=None, quotes=None, target_date=None):
     print("=" * 76)
     print("Webレポート（docs/index.html・results.html）生成中...")
@@ -402,6 +464,15 @@ def generate_web_report(df=None, quotes=None, target_date=None):
     with open(os.path.join(DOCS, "results.html"), "w", encoding="utf-8") as f:
         f.write(_build_results(tracked))
     print(f"  docs/results.html を生成しました")
+
+    # recent.html（過去10日の推奨）
+    try:
+        with open(os.path.join(DOCS, "recent.html"), "w", encoding="utf-8") as f:
+            f.write(_build_recent(tracked, days=10))
+        print(f"  docs/recent.html を生成しました")
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        print(f"  recent.html 生成エラー: {e}")
 
 
 def _dummy_quotes():

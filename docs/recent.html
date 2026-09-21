@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>過去10日の推奨</title>
+<style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f8f9fa; color: #333; line-height: 1.6; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    h1 { color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; font-size: 1.5em; }
+    h2 { color: #2c3e50; margin-top: 26px; font-size: 1.2em; border-left: 4px solid #1a73e8; padding-left: 10px; }
+    .nav { display: flex; flex-wrap: wrap; gap: 6px; background: #1a73e8; padding: 8px 12px; position: sticky; top: 0; z-index: 10; }
+    .nav a { color: #fff; text-decoration: none; font-weight: 600; font-size: 0.9em; padding: 6px 10px; border-radius: 6px; }
+    .nav a.active { background: rgba(255,255,255,0.25); }
+    .nav a:hover { background: rgba(255,255,255,0.15); }
+    .date-badge { background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 4px; font-weight: bold; display: inline-block; margin-bottom: 20px; }
+    .strategy-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .strategy-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 20px; border-top: 4px solid #1a73e8; }
+    .strategy-card.alt { border-top-color: #28a745; }
+    .strategy-card h3 { margin-top: 0; color: #1a73e8; font-size: 1.1em; }
+    .strategy-card.alt h3 { color: #28a745; }
+    .strategy-card p { font-size: 0.9em; margin-bottom: 10px; }
+    .strategy-card ul { font-size: 0.85em; padding-left: 20px; color: #555; }
+    .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-top: 15px; font-size: 0.9em; }
+    th, td { padding: 11px 13px; text-align: center; border-bottom: 1px solid #eee; white-space: nowrap; }
+    th { background: #1a73e8; color: #fff; font-weight: 600; cursor: pointer; user-select: none; }
+    th[data-sortable]:after { content: " \2195"; opacity: 0.5; font-size: 0.85em; }
+    tr:hover { background: #f1f3f4; }
+    .badge-main { background: #e8f0fe; color: #1a73e8; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+    .badge-sub { background: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+    .price-buy { font-weight: bold; color: #2c3e50; }
+    .price-tp { font-weight: bold; color: #137333; }
+    .price-sl { font-weight: bold; color: #d93025; }
+    .win { color: #137333; font-weight: bold; }
+    .lose { color: #d93025; font-weight: bold; }
+    .track { color: #8a6d00; font-weight: bold; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 16px 20px; margin-top: 12px; }
+    .no-data { text-align: center; padding: 40px; color: #666; background: #fff; border-radius: 8px; margin-top: 15px; }
+    .note { color: #888; font-size: 0.82em; margin-top: 16px; }
+    footer { margin-top: 40px; text-align: center; font-size: 0.8em; color: #888; padding-bottom: 30px; }
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 15px; }
+    .chart-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 12px 14px; }
+    .chart-card .ttl { font-weight: 700; color: #2c3e50; font-size: 0.95em; }
+    .chart-card .sub { color: #888; font-size: 0.8em; margin-bottom: 6px; }
+    .chart-card .px { font-size: 0.8em; margin-top: 4px; }
+    .chart-card .px b { color: #2c3e50; } .chart-card .px .tp { color: #137333; } .chart-card .px .sl { color: #d93025; }
+    svg.candles { width: 100%; height: auto; display: block; border: 1px solid #f0f0f0; border-radius: 4px; }
+    .chart-none { color: #999; font-size: 0.85em; padding: 20px; text-align: center; }
+    .legend { font-size: 0.78em; color: #777; margin: 6px 0 0; }
+    .legend .up { color: #e53935; font-weight: 700; } .legend .dn { color: #1e88e5; font-weight: 700; }
+</style>
+</head><body>
+<div class="nav"><a href="index.html">📋 今日の候補</a><a href="recent.html" class="active">🗓 過去10日の推奨</a><a href="results.html">📈 推奨のその後（実績）</a></div>
+<div class="wrap">
+<h1>🗓 過去10日の推奨</h1>
+<div class="date-badge">更新: 2026-09-21 23:39</div>
+<div class="card">直近10営業日の推奨: <b>26件</b>／結果確定: <b>0件</b>（利確 0・損切り 0、勝率 <b>—</b>）</div>
+<h2>2026-09-08（8件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6647.0">6,647.0</td><td data-v="7311.7">7,311.7</td><td data-v="6314.6">6,314.6</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>三十三フィナンシャルグループ<br><span style="color:#999;font-size:0.85em">73220</span></td><td>nan</td><td data-v="2093.0">2,093.0</td><td data-v="2302.3">2,302.3</td><td data-v="1988.3">1,988.3</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>ほくほくフィナンシャルグループ<br><span style="color:#999;font-size:0.85em">83770</span></td><td>nan</td><td data-v="8076.0">8,076.0</td><td data-v="8883.6">8,883.6</td><td data-v="7672.2">7,672.2</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>山梨中央銀行<br><span style="color:#999;font-size:0.85em">83600</span></td><td>nan</td><td data-v="7000.0">7,000.0</td><td data-v="7700.0">7,700.0</td><td data-v="6650.0">6,650.0</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>南都銀行<br><span style="color:#999;font-size:0.85em">83670</span></td><td>nan</td><td data-v="1897.0">1,897.0</td><td data-v="2086.7">2,086.7</td><td data-v="1802.1">1,802.1</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>百五銀行<br><span style="color:#999;font-size:0.85em">83680</span></td><td>nan</td><td data-v="2300.0">2,300.0</td><td data-v="2530.0">2,530.0</td><td data-v="2185.0">2,185.0</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>いよぎんホールディングス<br><span style="color:#999;font-size:0.85em">58300</span></td><td>nan</td><td data-v="3818.0">3,818.0</td><td data-v="4199.8">4,199.8</td><td data-v="3627.1">3,627.1</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>池田泉州ホールディングス<br><span style="color:#999;font-size:0.85em">87140</span></td><td>nan</td><td data-v="1052.0">1,052.0</td><td data-v="1157.2">1,157.2</td><td data-v="999.4">999.4</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-09-07（2件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6782.0">6,782.0</td><td data-v="7460.2">7,460.2</td><td data-v="6442.9">6,442.9</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>三十三フィナンシャルグループ<br><span style="color:#999;font-size:0.85em">73220</span></td><td>nan</td><td data-v="2140.0">2,140.0</td><td data-v="2354.0">2,354.0</td><td data-v="2033.0">2,033.0</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-09-04（2件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6856.0">6,856.0</td><td data-v="7541.6">7,541.6</td><td data-v="6513.2">6,513.2</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>山梨中央銀行<br><span style="color:#999;font-size:0.85em">83600</span></td><td>nan</td><td data-v="7190.0">7,190.0</td><td data-v="7909.0">7,909.0</td><td data-v="6830.5">6,830.5</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-09-03（2件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6885.0">6,885.0</td><td data-v="7573.5">7,573.5</td><td data-v="6540.8">6,540.8</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>山梨中央銀行<br><span style="color:#999;font-size:0.85em">83600</span></td><td>nan</td><td data-v="7210.0">7,210.0</td><td data-v="7931.0">7,931.0</td><td data-v="6849.5">6,849.5</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-09-02（2件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6868.0">6,868.0</td><td data-v="7554.8">7,554.8</td><td data-v="6524.6">6,524.6</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>三十三フィナンシャルグループ<br><span style="color:#999;font-size:0.85em">73220</span></td><td>nan</td><td data-v="2138.0">2,138.0</td><td data-v="2351.8">2,351.8</td><td data-v="2031.1">2,031.1</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-09-01（2件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6913.0">6,913.0</td><td data-v="7604.3">7,604.3</td><td data-v="6567.3">6,567.3</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>三十三フィナンシャルグループ<br><span style="color:#999;font-size:0.85em">73220</span></td><td>nan</td><td data-v="2132.0">2,132.0</td><td data-v="2345.2">2,345.2</td><td data-v="2025.4">2,025.4</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-08-31（1件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6850.0">6,850.0</td><td data-v="7535.0">7,535.0</td><td data-v="6507.5">6,507.5</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-08-28（1件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6861.0">6,861.0</td><td data-v="7547.1">7,547.1</td><td data-v="6517.9">6,517.9</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-08-27（1件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6850.0">6,850.0</td><td data-v="7535.0">7,535.0</td><td data-v="6507.5">6,507.5</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<h2>2026-08-25（5件）</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>区分</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最新時点%</th><th data-sortable>最大%</th><th data-sortable>最小%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>ＳＯＭＰＯホールディングス<br><span style="color:#999;font-size:0.85em">86300</span></td><td>nan</td><td data-v="6803.0">6,803.0</td><td data-v="7483.3">7,483.3</td><td data-v="6462.8">6,462.8</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>ほくほくフィナンシャルグループ<br><span style="color:#999;font-size:0.85em">83770</span></td><td>nan</td><td data-v="8025.0">8,025.0</td><td data-v="8827.5">8,827.5</td><td data-v="7623.8">7,623.8</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>山梨中央銀行<br><span style="color:#999;font-size:0.85em">83600</span></td><td>nan</td><td data-v="7110.0">7,110.0</td><td data-v="7821.0">7,821.0</td><td data-v="6754.5">6,754.5</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>滋賀銀行<br><span style="color:#999;font-size:0.85em">83660</span></td><td>nan</td><td data-v="2698.0">2,698.0</td><td data-v="2967.8">2,967.8</td><td data-v="2563.1">2,563.1</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr><tr><td>南都銀行<br><span style="color:#999;font-size:0.85em">83670</span></td><td>nan</td><td data-v="1865.0">1,865.0</td><td data-v="2051.5">2,051.5</td><td data-v="1771.8">1,771.8</td><td data-v=""></td><td data-v=""></td><td data-v=""></td><td><span class="track">データなし</span></td></tr></tbody></table></div>
+<div class="note">※ 買い指値＝推奨日の終値。翌日約定と仮定した実データ追跡。利確+10%・損切り-5%は終値ベース、到達順で先に来たほうを結果とします。手数料・スリッページ未考慮・投資助言ではありません。</div>
+<footer><p>© 2026 株式投資自動スクリーニングシステム ／ 投資助言ではありません・自己責任・手数料未考慮</p></footer>
+</div>
+
+<script>
+document.querySelectorAll('table').forEach(function(tbl){
+  var ths = tbl.querySelectorAll('thead th[data-sortable]');
+  ths.forEach(function(th, idx){
+    var col = th.cellIndex;
+    var asc = true;
+    th.addEventListener('click', function(){
+      var tb = tbl.querySelector('tbody');
+      var rows = Array.prototype.slice.call(tb.querySelectorAll('tr'));
+      rows.sort(function(a,b){
+        var x = a.cells[col].getAttribute('data-v') || a.cells[col].innerText;
+        var y = b.cells[col].getAttribute('data-v') || b.cells[col].innerText;
+        var nx = parseFloat(String(x).replace(/[^0-9.\-]/g,''));
+        var ny = parseFloat(String(y).replace(/[^0-9.\-]/g,''));
+        var both = !isNaN(nx) && !isNaN(ny);
+        if (both) return asc ? nx-ny : ny-nx;
+        return asc ? String(x).localeCompare(String(y),'ja') : String(y).localeCompare(String(x),'ja');
+      });
+      rows.forEach(function(r){ tb.appendChild(r); });
+      asc = !asc;
+    });
+  });
+});
+</script>
+
+</body></html>

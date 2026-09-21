@@ -73,12 +73,24 @@ def run_morning_routine():
 
     # 最新日の候補を抽出
     today_df = qi[qi["date"] == latest_date].copy()
-    valid_mask = today_df["is_bottom"] & today_df["is_vol_surge"] & today_df["is_range_wide"] & today_df["is_good_regime"]
-    # おすすめ度（スコア）の高い順に TOP8 のみ
-    candidates = today_df[valid_mask].sort_values("recommendation_score_%", ascending=False).head(8)
+
+    # 売買代金（流動性）フィルタ：最低5億円・最低株価200円（設定はconfig）
+    if "turnover_value" not in today_df.columns:
+        today_df["turnover_value"] = today_df["close"] * today_df["volume"]
+    min_to = getattr(config, "MIN_TURNOVER_VALUE", 500_000_000)
+    min_px = getattr(config, "MIN_PRICE", 200)
+    liquid = today_df[(today_df["turnover_value"] >= min_to) & (today_df["close"] >= min_px)].copy()
+
+    # 厳しい条件（本命モメンタム）を満たすものを最優先、足りない分はスコア上位で補充して必ずTOP8
+    strict_mask = liquid["is_bottom"] & liquid["is_vol_surge"] & liquid["is_range_wide"] & liquid["is_good_regime"]
+    strict = liquid[strict_mask].sort_values("recommendation_score_%", ascending=False)
+    rest = liquid[~strict_mask].sort_values("recommendation_score_%", ascending=False)
+    candidates = pd.concat([strict, rest], ignore_index=False).head(8)
+    n_strict = len(strict)
+    print(f"  流動性通過: {len(liquid)}件／厳格条件通過: {n_strict}件 → 表示TOP{min(8, len(candidates))}")
 
     if len(candidates) == 0:
-        print("本日の条件を満たす銘柄はありません。基準日記録用CSVを出力します。")
+        print("流動性を満たす銘柄がありません。基準日記録用CSVを出力します。")
         os.makedirs(config.OUTPUT_DIR, exist_ok=True)
         today_str = latest_date.date().isoformat()
         out_csv = os.path.join(config.OUTPUT_DIR, f"{today_str}_morning_orders.csv")
@@ -102,12 +114,20 @@ def run_morning_routine():
         sl_price = round(close_p * 0.95, 1) # 損切 -5%
         
         is_preferred_sector = sector in target_sectors
-        
+        is_strict = bool(row.get("is_bottom") and row.get("is_vol_surge")
+                         and row.get("is_range_wide") and row.get("is_good_regime"))
+        if is_strict:
+            kubun = "【本命】条件クリア"
+        elif is_preferred_sector:
+            kubun = "【高勝率業種】"
+        else:
+            kubun = "【参考】スコア上位"
+
         results.append({
             "銘柄コード": code,
             "企業名": row["company_name"],
             "業種": sector,
-            "区分": "【本命】高勝率セクター" if is_preferred_sector else "【参考】高スコア銘柄",
+            "区分": kubun,
             "おすすめ度(%)": score,
             "買い指値": buy_limit,
             "利確目標(TP+10%)": tp_price,

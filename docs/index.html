@@ -8,8 +8,8 @@
     .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
     h1 { color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; font-size: 1.5em; }
     h2 { color: #2c3e50; margin-top: 26px; font-size: 1.2em; border-left: 4px solid #1a73e8; padding-left: 10px; }
-    .nav { display: flex; gap: 8px; background: #1a73e8; padding: 10px 16px; position: sticky; top: 0; z-index: 10; }
-    .nav a { color: #fff; text-decoration: none; font-weight: 600; font-size: 0.95em; padding: 6px 12px; border-radius: 6px; }
+    .nav { display: flex; flex-wrap: wrap; gap: 6px; background: #1a73e8; padding: 8px 12px; position: sticky; top: 0; z-index: 10; }
+    .nav a { color: #fff; text-decoration: none; font-weight: 600; font-size: 0.9em; padding: 6px 10px; border-radius: 6px; }
     .nav a.active { background: rgba(255,255,255,0.25); }
     .nav a:hover { background: rgba(255,255,255,0.15); }
     .date-badge { background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 4px; font-weight: bold; display: inline-block; margin-bottom: 20px; }
@@ -50,7 +50,7 @@
     .legend .up { color: #e53935; font-weight: 700; } .legend .dn { color: #1e88e5; font-weight: 700; }
 </style>
 </head><body>
-<div class="nav"><a href="index.html" class="active">📋 今日の候補</a><a href="results.html">📈 推奨のその後（実績）</a></div>
+<div class="nav"><a href="index.html" class="active">📋 今日の候補</a><a href="recent.html">🗓 過去10日の推奨</a><a href="results.html">📈 推奨のその後（実績）</a></div>
 <div class="wrap">
 <h1>今日の株式運用候補 ＆ 指値プラン</h1>
 <div class="date-badge">基準日: 2026-09-21</div>
@@ -72,7 +72,7 @@
         </div>
     </div>
 <h2>📋 本日のスクリーニング＆指値結果一覧</h2>
-<div class="no-data"><p>本日の基準（高値-30%超・出来高急増）を満たす銘柄はありませんでした。</p></div>
+<div class="no-data"><p>本日は候補を表示できませんでした（株価データ未取得、または売買代金5億円以上の銘柄が抽出できませんでした）。翌営業日の自動実行で更新されます。</p></div>
 <footer><p>© 2026 株式投資自動スクリーニングシステム ／ 投資助言ではありません・自己責任・手数料未考慮</p></footer>
 </div>
 
