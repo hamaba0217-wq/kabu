@@ -2,7 +2,7 @@ name: Daily Morning Stock Screening & Web Report
 
 on:
   schedule:
-    - cron: '0 22 * * 0-4'
+    - cron: '0 22 * * 0-4' # 平日朝7:00(JST)実行
   workflow_dispatch:
 
 jobs:
@@ -23,14 +23,14 @@ jobs:
           pip install -r requirements.txt
           pip install yfinance jquants-api-client
 
-      - name: Run python web_report.py
+      - name: Run web_report.py
         run: python web_report.py
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
           LIGHT_MODE: "1"
 
-      - name: Commit and push changes to site
+      - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-generate daily stock report"
+          commit_message: "Auto-generate daily stock screening & orders"
           branch: main
