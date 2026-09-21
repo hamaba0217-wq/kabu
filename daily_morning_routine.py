@@ -46,13 +46,20 @@ def run_morning_routine():
 
     codes_str = qi["code"].astype(str)
     sector_map = {}
+    name_map = {}
     if listed is not None:
         code_col = "Code" if "Code" in listed.columns else "code"
-        sec_col = "sector33" if "sector33" in listed.columns else "Sector33CodeName"
-        if code_col in listed.columns and sec_col in listed.columns:
-            sector_map = dict(zip(listed[code_col].astype(str).str.slice(0, 4), listed[sec_col]))
+        sec_col = "sector33" if "sector33" in listed.columns else ("Sector33CodeName" if "Sector33CodeName" in listed.columns else None)
+        name_col = "CompanyName" if "CompanyName" in listed.columns else ("company_name" if "company_name" in listed.columns else ("Name" if "Name" in listed.columns else None))
+        
+        if code_col in listed.columns:
+            if sec_col and sec_col in listed.columns:
+                sector_map = dict(zip(listed[code_col].astype(str).str.slice(0, 4), listed[sec_col]))
+            if name_col and name_col in listed.columns:
+                name_map = dict(zip(listed[code_col].astype(str).str.slice(0, 4), listed[name_col]))
 
     qi["sector"] = codes_str.str.slice(0, 4).map(sector_map).fillna("その他")
+    qi["company_name"] = codes_str.str.slice(0, 4).map(name_map).fillna("不明")
     qi["is_bottom"] = qi["pct_from_high"] <= -0.30
     qi["is_vol_surge"] = qi["vol_ratio"] >= 2.0
     qi["is_range_wide"] = qi["day_range"] >= 7.0
@@ -74,7 +81,7 @@ def run_morning_routine():
         os.makedirs(config.OUTPUT_DIR, exist_ok=True)
         today_str = latest_date.date().isoformat()
         out_csv = os.path.join(config.OUTPUT_DIR, f"{today_str}_morning_orders.csv")
-        pd.DataFrame(columns=["銘柄コード","業種","区分","おすすめ度(%)","買い指値","利確目標(TP+10%)","損切ライン(SL-5%)","出来高倍率"]).to_csv(out_csv, index=False, encoding="utf-8-sig")
+        pd.DataFrame(columns=["銘柄コード","企業名","業種","区分","おすすめ度(%)","買い指値","利確目標(TP+10%)","損切ライン(SL-5%)","出来高倍率"]).to_csv(out_csv, index=False, encoding="utf-8-sig")
         return
 
     # 勝率55%以上の高勝率セクター
@@ -96,6 +103,7 @@ def run_morning_routine():
         
         results.append({
             "銘柄コード": code,
+            "企業名": row["company_name"],
             "業種": sector,
             "区分": "【本命】高勝率セクター" if is_preferred_sector else "【参考】高スコア銘柄",
             "おすすめ度(%)": score,

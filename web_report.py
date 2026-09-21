@@ -106,6 +106,7 @@ def generate_web_report():
         <thead>
             <tr>
                 <th>銘柄コード</th>
+                <th>企業名</th>
                 <th>業種</th>
                 <th>検証区分</th>
                 <th>おすすめ度(%)</th>
@@ -122,6 +123,7 @@ def generate_web_report():
             html_content += f"""
             <tr>
                 <td><strong>{row['銘柄コード']}</strong></td>
+                <td><strong>{row['企業名']}</strong></td>
                 <td>{row['業種']}</td>
                 <td><span class="{badge_class}">{row['区分']}</span></td>
                 <td><strong>{row['おすすめ度(%)']}%</strong></td>
