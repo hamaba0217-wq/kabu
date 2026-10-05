@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPO注目</title>
+<style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f8f9fa; color: #333; line-height: 1.6; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    h1 { color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; font-size: 1.5em; }
+    h2 { color: #2c3e50; margin-top: 26px; font-size: 1.2em; border-left: 4px solid #1a73e8; padding-left: 10px; }
+    .nav { display: flex; flex-wrap: wrap; gap: 6px; background: #1a73e8; padding: 8px 12px; position: sticky; top: 0; z-index: 10; }
+    .nav a { color: #fff; text-decoration: none; font-weight: 600; font-size: 0.9em; padding: 6px 10px; border-radius: 6px; }
+    .nav a.active { background: rgba(255,255,255,0.25); }
+    .nav a:hover { background: rgba(255,255,255,0.15); }
+    .date-badge { background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 4px; font-weight: bold; display: inline-block; margin-bottom: 20px; }
+    .strategy-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .strategy-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 20px; border-top: 4px solid #1a73e8; }
+    .strategy-card.alt { border-top-color: #28a745; }
+    .strategy-card h3 { margin-top: 0; color: #1a73e8; font-size: 1.1em; }
+    .strategy-card.alt h3 { color: #28a745; }
+    .strategy-card p { font-size: 0.9em; margin-bottom: 10px; }
+    .strategy-card ul { font-size: 0.85em; padding-left: 20px; color: #555; }
+    .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-top: 15px; font-size: 0.9em; }
+    th, td { padding: 11px 13px; text-align: center; border-bottom: 1px solid #eee; white-space: nowrap; }
+    th { background: #1a73e8; color: #fff; font-weight: 600; cursor: pointer; user-select: none; }
+    th[data-sortable]:after { content: " \2195"; opacity: 0.5; font-size: 0.85em; }
+    tr:hover { background: #f1f3f4; }
+    .badge-main { background: #e8f0fe; color: #1a73e8; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+    .badge-sub { background: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+    .price-buy { font-weight: bold; color: #2c3e50; }
+    .price-tp { font-weight: bold; color: #137333; }
+    .price-sl { font-weight: bold; color: #d93025; }
+    .win { color: #137333; font-weight: bold; }
+    .lose { color: #d93025; font-weight: bold; }
+    .track { color: #8a6d00; font-weight: bold; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 16px 20px; margin-top: 12px; }
+    .no-data { text-align: center; padding: 40px; color: #666; background: #fff; border-radius: 8px; margin-top: 15px; }
+    .note { color: #888; font-size: 0.82em; margin-top: 16px; }
+    footer { margin-top: 40px; text-align: center; font-size: 0.8em; color: #888; padding-bottom: 30px; }
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 15px; }
+    .chart-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 12px 14px; }
+    .chart-card .ttl { font-weight: 700; color: #2c3e50; font-size: 0.95em; }
+    .chart-card .sub { color: #888; font-size: 0.8em; margin-bottom: 6px; }
+    .chart-card .px { font-size: 0.8em; margin-top: 4px; }
+    .chart-card .px b { color: #2c3e50; } .chart-card .px .tp { color: #137333; } .chart-card .px .sl { color: #d93025; }
+    svg.candles { width: 100%; height: auto; display: block; border: 1px solid #f0f0f0; border-radius: 4px; }
+    .chart-none { color: #999; font-size: 0.85em; padding: 20px; text-align: center; }
+    .legend { font-size: 0.78em; color: #777; margin: 6px 0 0; }
+    .legend .up { color: #e53935; font-weight: 700; } .legend .dn { color: #1e88e5; font-weight: 700; }
+</style>
+</head><body>
+<div class="nav"><a href="index.html">📋 今日の候補</a><a href="ipo.html" class="active">🚀 IPO注目</a><a href="recent.html">🗓 過去10日の推奨</a><a href="results.html">📈 推奨のその後（実績）</a></div>
+<div class="wrap">
+<h1>🚀 IPO注目（上場3か月以内・ルール点灯）</h1>
+<div class="date-badge">更新: 2026-10-06 00:27</div>
+<p class="legend">検証で「対相場超過プラス＋前半後半で再現」を確認したルール群。件数が少なくても点灯すれば表示します（買うかはご自身の判断で）。目安の出口：<b>利確+20%（or +15%）／損切り-10%／最長20営業日</b>。投資助言ではありません。</p>
+<h2>本日点灯したシグナル</h2>
+<div class="tablewrap"><table><thead><tr><th data-sortable>銘柄コード</th><th data-sortable>企業名</th><th data-sortable>業種</th><th data-sortable>分類</th><th data-sortable>上場来日数</th><th data-sortable>初期5日上昇率</th><th data-sortable>出来高倍率</th><th data-sortable>買い指値</th><th data-sortable>利確+20%</th><th data-sortable>利確+15%</th><th data-sortable>損切り-10%</th></tr></thead><tbody><tr><td><strong>643A0</strong></td><td><strong>三菱ＵＦＪ証券ホールディングス株式会社　データセンターインフラ　日本株（ネットリターン）ＥＴＮ</strong></td><td>その他</td><td><span class="badge-sub">5日ブレイク / 過熱+10% / 上場来高値更新</span></td><td data-v="6">6日</td><td data-v="12.2">12.2%</td><td data-v="0.61">0.61倍</td><td class="price-buy" data-v="11640.0">11,640.0円</td><td class="price-tp" data-v="13968.0">13,968.0円</td><td class="price-tp" data-v="13386.0">13,386.0円</td><td class="price-sl" data-v="10476.0">10,476.0円</td></tr><tr><td><strong>644A0</strong></td><td><strong>三菱ＵＦＪ証券ホールディングス株式会社　防衛フォーカス　日本株（ネットリターン）ＥＴＮ</strong></td><td>その他</td><td><span class="badge-sub">上場来高値更新</span></td><td data-v="6">6日</td><td data-v="2.7">2.7%</td><td data-v="0.16">0.16倍</td><td class="price-buy" data-v="10270.0">10,270.0円</td><td class="price-tp" data-v="12324.0">12,324.0円</td><td class="price-tp" data-v="11810.5">11,810.5円</td><td class="price-sl" data-v="9243.0">9,243.0円</td></tr><tr><td><strong>633A0</strong></td><td><strong>Ｇｌｏｂａｌ　Ｘ　Ｊａｐａｎ株式会社　グローバルＸ　韓国半導体・トップ１０　ＥＴＦ</strong></td><td>その他</td><td><span class="badge-sub">上場来高値更新</span></td><td data-v="16">16日</td><td data-v="0.2">0.2%</td><td data-v="0.77">0.77倍</td><td class="price-buy" data-v="1102.0">1,102.0円</td><td class="price-tp" data-v="1322.4">1,322.4円</td><td class="price-tp" data-v="1267.3">1,267.3円</td><td class="price-sl" data-v="991.8">991.8円</td></tr><tr><td><strong>632A0</strong></td><td><strong>Ｇｌｏｂａｌ　Ｘ　Ｊａｐａｎ株式会社　グローバルＸ　日経２２５　ＥＴＦ</strong></td><td>その他</td><td><span class="badge-sub">上場来高値更新</span></td><td data-v="16">16日</td><td data-v="-0.0">-0.0%</td><td data-v="1.45">1.45倍</td><td class="price-buy" data-v="70370.0">70,370.0円</td><td class="price-tp" data-v="84444.0">84,444.0円</td><td class="price-tp" data-v="80925.5">80,925.5円</td><td class="price-sl" data-v="63333.0">63,333.0円</td></tr><tr><td><strong>610A0</strong></td><td><strong>Ｇｌｏｂａｌ　Ｘ　Ｊａｐａｎ株式会社　グローバルＸ　宇宙テック・トップ１０　ＥＴＦ（除く日本）</strong></td><td>その他</td><td><span class="badge-sub">5日ブレイク / 過熱+10%</span></td><td data-v="44">44日</td><td data-v="11.4">11.4%</td><td data-v="1.77">1.77倍</td><td class="price-buy" data-v="1093.0">1,093.0円</td><td class="price-tp" data-v="1311.6">1,311.6円</td><td class="price-tp" data-v="1256.9">1,256.9円</td><td class="price-sl" data-v="983.7">983.7円</td></tr></tbody></table></div>
+<h2>これまでのIPOシグナルの結果</h2>
+<div class="card">記録: <b>5件</b>／結果確定: <b>0件</b>（利確 0・損切り 0、勝率 <b>—</b>）</div>
+<div class="tablewrap"><table><thead><tr><th data-sortable>推奨日</th><th data-sortable>銘柄名</th><th data-sortable>分類</th><th data-sortable>買い指値</th><th data-sortable>利確</th><th data-sortable>損切り</th><th data-sortable>最大上昇%</th><th data-sortable>最新%</th><th data-sortable>結果</th></tr></thead><tbody><tr><td>2026-10-05</td><td>三菱ＵＦＪ証券ホールディングス株式会社　データセンターインフラ　日本株（ネットリターン）ＥＴＮ<br><span style="color:#999;font-size:0.85em">643A0</span></td><td>5日ブレイク / 過熱+10% / 上場来高値更新</td><td data-v="11640.0">11,640.0</td><td data-v="13968.0">13,968.0</td><td data-v="10476.0">10,476.0</td><td data-v=""></td><td data-v=""></td><td><span class="track">追跡中（翌日以降待ち）</span></td></tr><tr><td>2026-10-05</td><td>三菱ＵＦＪ証券ホールディングス株式会社　防衛フォーカス　日本株（ネットリターン）ＥＴＮ<br><span style="color:#999;font-size:0.85em">644A0</span></td><td>上場来高値更新</td><td data-v="10270.0">10,270.0</td><td data-v="12324.0">12,324.0</td><td data-v="9243.0">9,243.0</td><td data-v=""></td><td data-v=""></td><td><span class="track">追跡中（翌日以降待ち）</span></td></tr><tr><td>2026-10-05</td><td>Ｇｌｏｂａｌ　Ｘ　Ｊａｐａｎ株式会社　グローバルＸ　韓国半導体・トップ１０　ＥＴＦ<br><span style="color:#999;font-size:0.85em">633A0</span></td><td>上場来高値更新</td><td data-v="1102.0">1,102.0</td><td data-v="1322.4">1,322.4</td><td data-v="991.8">991.8</td><td data-v=""></td><td data-v=""></td><td><span class="track">追跡中（翌日以降待ち）</span></td></tr><tr><td>2026-10-05</td><td>Ｇｌｏｂａｌ　Ｘ　Ｊａｐａｎ株式会社　グローバルＸ　日経２２５　ＥＴＦ<br><span style="color:#999;font-size:0.85em">632A0</span></td><td>上場来高値更新</td><td data-v="70370.0">70,370.0</td><td data-v="84444.0">84,444.0</td><td data-v="63333.0">63,333.0</td><td data-v=""></td><td data-v=""></td><td><span class="track">追跡中（翌日以降待ち）</span></td></tr><tr><td>2026-10-05</td><td>Ｇｌｏｂａｌ　Ｘ　Ｊａｐａｎ株式会社　グローバルＸ　宇宙テック・トップ１０　ＥＴＦ（除く日本）<br><span style="color:#999;font-size:0.85em">610A0</span></td><td>5日ブレイク / 過熱+10%</td><td data-v="1093.0">1,093.0</td><td data-v="1311.6">1,311.6</td><td data-v="983.7">983.7</td><td data-v=""></td><td data-v=""></td><td><span class="track">追跡中（翌日以降待ち）</span></td></tr></tbody></table></div>
+<div class="note">※ 買い指値＝点灯日の終値。利確+20%・損切り-10%は高値安値ベース、最長20営業日で手仕舞い。手数料・スリッページ未考慮・投資助言ではありません。</div>
+<footer><p>© 2026 株式投資自動スクリーニングシステム ／ 投資助言ではありません・自己責任・手数料未考慮</p></footer>
+</div>
+
+<script>
+document.querySelectorAll('table').forEach(function(tbl){
+  var ths = tbl.querySelectorAll('thead th[data-sortable]');
+  ths.forEach(function(th, idx){
+    var col = th.cellIndex;
+    var asc = true;
+    th.addEventListener('click', function(){
+      var tb = tbl.querySelector('tbody');
+      var rows = Array.prototype.slice.call(tb.querySelectorAll('tr'));
+      rows.sort(function(a,b){
+        var x = a.cells[col].getAttribute('data-v') || a.cells[col].innerText;
+        var y = b.cells[col].getAttribute('data-v') || b.cells[col].innerText;
+        var nx = parseFloat(String(x).replace(/[^0-9.\-]/g,''));
+        var ny = parseFloat(String(y).replace(/[^0-9.\-]/g,''));
+        var both = !isNaN(nx) && !isNaN(ny);
+        if (both) return asc ? nx-ny : ny-nx;
+        return asc ? String(x).localeCompare(String(y),'ja') : String(y).localeCompare(String(x),'ja');
+      });
+      rows.forEach(function(r){ tb.appendChild(r); });
+      asc = !asc;
+    });
+  });
+});
+</script>
+
+</body></html>
