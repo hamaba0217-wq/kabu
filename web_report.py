@@ -189,6 +189,7 @@ def _nav(active):
         return ' class="active"' if p == active else ""
     return (f'<div class="nav">'
             f'<a href="index.html"{cls("index")}>📋 今日の候補</a>'
+            f'<a href="ipo.html"{cls("ipo")}>🚀 IPO注目</a>'
             f'<a href="recent.html"{cls("recent")}>🗓 過去10日の推奨</a>'
             f'<a href="results.html"{cls("results")}>📈 推奨のその後（実績）</a>'
             f'</div>')
@@ -416,7 +417,7 @@ def _build_recent(tracked, days=10):
     return _page("過去10日の推奨", "recent", "\n".join(body))
 
 
-def generate_web_report(df=None, quotes=None, target_date=None):
+def generate_web_report(df=None, quotes=None, target_date=None, listed=None):
     print("=" * 76)
     print("Webレポート（docs/index.html・results.html）生成中...")
     print("=" * 76)
@@ -474,6 +475,25 @@ def generate_web_report(df=None, quotes=None, target_date=None):
         import traceback; traceback.print_exc()
         print(f"  recent.html 生成エラー: {e}")
 
+    # ipo.html（IPO注目シグナル）
+    try:
+        import ipo_signals
+        if quotes is not None and not quotes.empty:
+            today_sig = ipo_signals.find_today_signals(quotes, listed)
+            td = target_date or dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date().isoformat()
+            ipo_signals.record_signals(today_sig, td)
+            ipo_tracked = ipo_signals.track_signals(quotes)
+        else:
+            today_sig = pd.DataFrame()
+            ipo_tracked = ipo_signals.track_signals(quotes) if quotes is not None else pd.DataFrame()
+        body = ipo_signals.build_ipo_body(today_sig, ipo_tracked)
+        with open(os.path.join(DOCS, "ipo.html"), "w", encoding="utf-8") as f:
+            f.write(_page("IPO注目", "ipo", body))
+        print(f"  docs/ipo.html を生成しました")
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        print(f"  ipo.html 生成エラー: {e}")
+
 
 def _dummy_quotes():
     """quotes が無い環境向け。履歴は表示するが追跡結果は『データなし』となる。"""
@@ -482,11 +502,11 @@ def _dummy_quotes():
 
 def main():
     print(">>> 1. スクリーニング実行中（daily_morning_routine）...")
-    df = quotes = target_date = None
+    df = quotes = target_date = listed = None
     try:
         ret = run_morning_routine()
         if isinstance(ret, tuple):
-            df, quotes, target_date = (list(ret) + [None, None, None])[:3]
+            df, quotes, target_date, listed = (list(ret) + [None, None, None, None])[:4]
     except SystemExit as e:
         # JQuants() はAPIキー未設定/ネット中断で SystemExit を投げる。
         # ここで握りつぶし、Webページ生成は必ず継続する（ジョブを赤くしない）。
@@ -495,9 +515,9 @@ def main():
         import traceback; traceback.print_exc()
         print(f"スクリーニング実行エラー: {e}")
 
-    print(">>> 2. WebレポートHTML生成中（index.html・results.html）...")
+    print(">>> 2. WebレポートHTML生成中（index.html・ipo.html・recent.html・results.html）...")
     try:
-        generate_web_report(df=df, quotes=quotes, target_date=target_date)
+        generate_web_report(df=df, quotes=quotes, target_date=target_date, listed=listed)
     except Exception as e:
         import traceback; traceback.print_exc()
         print(f"Web生成エラー: {e}")

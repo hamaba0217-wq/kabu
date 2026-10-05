@@ -54,6 +54,7 @@ import candidates_best
 import web_report
 import limitup_analyze
 import limitup_strategy
+import ipo_analyze
 import limitup_intraday
 import limitup_dip
 import limitup_all_hypotheses
@@ -425,6 +426,25 @@ def main() -> None:
         print("データ読み込み中（2年分・OHLC）...")
         quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
         limitup_strategy.run(quotes)
+    elif cmd == "ipo-analyze":
+        import config
+        from sources import JQuants
+        # 任意の年数指定: 例 `python main.py ipo-analyze 4` で4年分
+        years = None
+        if len(sys.argv) >= 3:
+            try:
+                years = float(sys.argv[2])
+            except ValueError:
+                years = None
+        days = int(years * 365) if years else config.BACKTEST_LOOKBACK_DAYS
+        jq = JQuants()
+        print(f"データ読み込み中（約{days/365:.1f}年分・OHLC）...")
+        quotes = jq.quotes(days)
+        try:
+            listed = jq.listed()
+        except Exception:
+            listed = None
+        ipo_analyze.run(quotes, listed)
     elif cmd == "portfolio-sim":
         import cache
         print("ローカルキャッシュからデータを読み込んでいます（APIアクセスなし）...")
