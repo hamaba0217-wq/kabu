@@ -330,41 +330,31 @@ def _build_index(df, target_date, quotes=None):
         body.append('<p class="legend">売買代金5億円以上からスコア上位8銘柄を表示'
                     '（<b>【本命】条件クリア</b>＝高値-30%超×出来高急増×値幅大×地合い良、を優先）。'
                     '指値・利確・損切りは目安、投資助言ではありません。</p>')
-        head = ["銘柄コード","企業名","業種","検証区分","おすすめ度(%)","買い指値","利確目標 (TP+10%)","損切ライン (SL-5%)","出来高倍率"]
-        thead = "".join(f'<th data-sortable>{_esc(h)}</th>' for h in head)
-        rows = []
-        for _, r in df.iterrows():
-            badge = "badge-main" if "本命" in str(r["区分"]) else "badge-sub"
-            rows.append(
-                "<tr>"
-                f'<td><strong>{_esc(r["銘柄コード"])}</strong></td>'
-                f'<td><strong>{_esc(r["企業名"])}</strong></td>'
-                f'<td>{_esc(r["業種"])}</td>'
-                f'<td><span class="{badge}">{_esc(r["区分"])}</span></td>'
-                f'<td data-v="{r["おすすめ度(%)"]}"><strong>{r["おすすめ度(%)"]}%</strong></td>'
-                f'<td class="price-buy" data-v="{r["買い指値"]}">{r["買い指値"]:,} 円</td>'
-                f'<td class="price-tp" data-v="{r["利確目標(TP+10%)"]}">+{r["利確目標(TP+10%)"]:,} 円</td>'
-                f'<td class="price-sl" data-v="{r["損切ライン(SL-5%)"]}">-{r["損切ライン(SL-5%)"]:,} 円</td>'
-                f'<td data-v="{r["出来高倍率"]}">{r["出来高倍率"]} 倍</td>'
-                "</tr>")
-        body.append(f'<div class="tablewrap"><table><thead><tr>{thead}</tr></thead>'
-                    f'<tbody>{"".join(rows)}</tbody></table></div>')
-
-        # --- 各銘柄のローソク（6か月・日足）---
-        body.append('<h2>📈 おすすめ銘柄のチャート（6か月・日足）</h2>')
         body.append('<p class="legend"><span class="up">■</span> 陽線（終値≥始値）　'
                     '<span class="dn">■</span> 陰線（終値&lt;始値）　'
                     '／ 点線：<span style="color:#5f6368">買い</span>・'
                     '<span style="color:#137333">利確+10%</span>・'
                     '<span style="color:#d93025">損切り-5%</span>　／ 下段＝出来高</p>')
+
+        qs = None
         if quotes is not None and not quotes.empty:
             qs = quotes.copy()
             qs["code"] = qs["code"].astype(str)
             by_code = {code: g for code, g in qs.groupby("code")}
-            cards = []
-            for _, r in df.iterrows():
-                try:
-                    code = str(r["銘柄コード"])
+
+        def _yen(v):
+            try:
+                return f"{float(v):,.1f}円"
+            except (TypeError, ValueError):
+                return f"{_esc(v)}円"
+
+        items = []
+        for _, r in df.iterrows():
+            try:
+                code = str(r["銘柄コード"])
+                badge = "badge-main" if "本命" in str(r["区分"]) else "badge-sub"
+                svg = '<div class="chart-none">チャート用の株価データがありません（毎朝の実行で表示されます）。</div>'
+                if qs is not None:
                     dfc = by_code.get(code)
                     if dfc is None:
                         dfc = by_code.get(code[:4])
@@ -372,26 +362,19 @@ def _build_index(df, target_date, quotes=None):
                         dfc = by_code.get(code + "0")
                     svg = _candles_svg(dfc, buy=r.get("買い指値"),
                                        tp=r.get("利確目標(TP+10%)"), sl=r.get("損切ライン(SL-5%)"))
-                    def _yen(v):
-                        try:
-                            return f"{float(v):,.1f}円"
-                        except (TypeError, ValueError):
-                            return f"{_esc(v)}円"
-                    cards.append(
-                        '<div class="chart-card">'
-                        f'<div class="ttl">{_esc(r["企業名"])} <span style="color:#999">({_esc(code)})</span></div>'
-                        f'<div class="sub">{_esc(r.get("業種",""))}｜{_esc(r.get("区分",""))}</div>'
-                        f'{svg}'
-                        f'<div class="px"><b>買い {_yen(r.get("買い指値"))}</b>　'
-                        f'<span class="tp">利確 {_yen(r.get("利確目標(TP+10%)"))}</span>　'
-                        f'<span class="sl">損切 {_yen(r.get("損切ライン(SL-5%)"))}</span></div>'
-                        '</div>')
-                except Exception as e:
-                    cards.append(f'<div class="chart-card"><div class="chart-none">チャート生成エラー: {_esc(e)}</div></div>')
-            body.append(f'<div class="chart-grid">{"".join(cards)}</div>')
-        else:
-            body.append('<div class="chart-none">チャート用の株価データがありません'
-                        '（クラウドの毎朝実行で表示されます）。</div>')
+                items.append(
+                    '<div class="chart-card">'
+                    f'<div class="ttl">{_esc(r["企業名"])} <span style="color:#999">({_esc(code)})</span>'
+                    f'<span class="res"><span class="{badge}">{_esc(r["区分"])}</span></span></div>'
+                    f'<div class="sub">{_esc(r["業種"])}｜おすすめ度 {r["おすすめ度(%)"]}%・出来高 {r["出来高倍率"]}倍</div>'
+                    f'<div class="px"><b>買い {_yen(r.get("買い指値"))}</b>　'
+                    f'<span class="tp">利確 {_yen(r.get("利確目標(TP+10%)"))}</span>　'
+                    f'<span class="sl">損切 {_yen(r.get("損切ライン(SL-5%)"))}</span></div>'
+                    f'{svg}'
+                    '</div>')
+            except Exception as e:
+                items.append(f'<div class="chart-card"><div class="chart-none">生成エラー: {_esc(e)}</div></div>')
+        body.append(f'<div class="pick-list">{"".join(items)}</div>')
     else:
         body.append('<div class="no-data"><p>本日は候補を表示できませんでした'
                     '（株価データ未取得、または売買代金5億円以上の銘柄が抽出できませんでした）。'
