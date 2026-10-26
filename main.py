@@ -55,6 +55,8 @@ import web_report
 import limitup_analyze
 import limitup_strategy
 import ipo_analyze
+import pick_timing
+import winloss
 import limitup_intraday
 import limitup_dip
 import limitup_all_hypotheses
@@ -445,6 +447,25 @@ def main() -> None:
         except Exception:
             listed = None
         ipo_analyze.run(quotes, listed)
+    elif cmd == "pick-timing":
+        import config
+        from sources import JQuants
+        years = None
+        if len(sys.argv) >= 3:
+            try: years = float(sys.argv[2])
+            except ValueError: years = None
+        days = int(years * 365) if years else config.BACKTEST_LOOKBACK_DAYS
+        jq = JQuants()
+        print(f"データ読み込み中（約{days/365:.1f}年分・OHLC）...")
+        quotes = jq.quotes(days)
+        pick_timing.run(quotes)
+    elif cmd == "winloss":
+        import config
+        from sources import JQuants
+        jq = JQuants()
+        print("データ読み込み中（2年分・OHLC）...")
+        quotes = jq.quotes(config.BACKTEST_LOOKBACK_DAYS)
+        winloss.run(quotes)
     elif cmd == "portfolio-sim":
         import cache
         print("ローカルキャッシュからデータを読み込んでいます（APIアクセスなし）...")

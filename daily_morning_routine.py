@@ -60,16 +60,28 @@ def run_morning_routine():
 
     qi["sector"] = codes_str.str.slice(0, 4).map(sector_map).fillna("その他")
     qi["company_name"] = codes_str.str.slice(0, 4).map(name_map).fillna("不明")
+
+    # 25日移動平均（上昇トレンド判定用）
+    qi["ma25"] = g["close"].transform(lambda s: s.rolling(25, min_periods=10).mean())
+    qi["above_ma25"] = qi["close"] / qi["ma25"] - 1.0
+
+    # 旧モメンタム条件（参考・区分表示用に残す）
     qi["is_bottom"] = qi["pct_from_high"] <= -0.30
     qi["is_vol_surge"] = qi["vol_ratio"] >= 2.0
     qi["is_range_wide"] = qi["day_range"] >= 7.0
     qi["is_good_regime"] = qi["market_ma5"] >= 0.0
 
-    # スコア算出
-    v_norm = np.clip((qi["vol_ratio"] - 2.0) / 8.0, 0.0, 1.0)
-    r_norm = np.clip((qi["day_range"] - 7.0) / 10.0, 0.0, 1.0)
-    b_norm = np.clip((-qi["pct_from_high"] - 0.30) / 0.50, 0.0, 1.0)
-    qi["recommendation_score_%"] = (60.0 + (v_norm * 15.0 + r_norm * 15.0 + b_norm * 9.0)).round(1)
+    # ★新・勝ちパターン条件（検証で勝率59%・再現性ありだった形）
+    #   上昇トレンド(25日線上) × 出来高が静か(1.5倍未満) × 深い底でない(高値-25%以内)
+    qi["is_uptrend"] = qi["above_ma25"] > 0.0
+    qi["is_quiet_vol"] = qi["vol_ratio"] < 1.5
+    qi["not_deep_bottom"] = qi["pct_from_high"] > -0.25
+
+    # スコア：静かなほど＋、上昇トレンド＋、深い底でない＋（最大～100）
+    q_norm = np.clip((1.5 - qi["vol_ratio"]) / 1.2, 0.0, 1.0)   # 出来高が静かなほど高い
+    qi["recommendation_score_%"] = (60.0 + q_norm * 25.0
+                                    + qi["is_uptrend"].astype(float) * 8.0
+                                    + qi["not_deep_bottom"].astype(float) * 7.0).round(1)
 
     # 最新日の候補を抽出
     today_df = qi[qi["date"] == latest_date].copy()
@@ -81,13 +93,14 @@ def run_morning_routine():
     min_px = getattr(config, "MIN_PRICE", 200)
     liquid = today_df[(today_df["turnover_value"] >= min_to) & (today_df["close"] >= min_px)].copy()
 
-    # 厳しい条件（本命モメンタム）を満たすものを最優先、足りない分はスコア上位で補充して必ずTOP8
-    strict_mask = liquid["is_bottom"] & liquid["is_vol_surge"] & liquid["is_range_wide"] & liquid["is_good_regime"]
+    # ★新・勝ちパターンを満たすものを最優先、足りない分はスコア上位で補充してTOP8
+    strict_mask = (liquid["is_uptrend"] & liquid["is_quiet_vol"]
+                   & liquid["not_deep_bottom"] & liquid["is_good_regime"])
     strict = liquid[strict_mask].sort_values("recommendation_score_%", ascending=False)
     rest = liquid[~strict_mask].sort_values("recommendation_score_%", ascending=False)
     candidates = pd.concat([strict, rest], ignore_index=False).head(8)
     n_strict = len(strict)
-    print(f"  流動性通過: {len(liquid)}件／厳格条件通過: {n_strict}件 → 表示TOP{min(8, len(candidates))}")
+    print(f"  流動性通過: {len(liquid)}件／勝ちパターン通過: {n_strict}件 → 表示TOP{min(8, len(candidates))}")
 
     if len(candidates) == 0:
         print("流動性を満たす銘柄がありません。基準日記録用CSVを出力します。")
@@ -114,10 +127,10 @@ def run_morning_routine():
         sl_price = round(close_p * 0.95, 1) # 損切 -5%
         
         is_preferred_sector = sector in target_sectors
-        is_strict = bool(row.get("is_bottom") and row.get("is_vol_surge")
-                         and row.get("is_range_wide") and row.get("is_good_regime"))
-        if is_strict:
-            kubun = "【本命】条件クリア"
+        is_win_pattern = bool(row.get("is_uptrend") and row.get("is_quiet_vol")
+                              and row.get("not_deep_bottom") and row.get("is_good_regime"))
+        if is_win_pattern:
+            kubun = "【本命】勝ちパターン"
         elif is_preferred_sector:
             kubun = "【高勝率業種】"
         else:
