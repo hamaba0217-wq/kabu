@@ -68,14 +68,47 @@ BASE_STYLE = """
     .chart-card .px b { color: #2c3e50; } .chart-card .px .tp { color: #137333; } .chart-card .px .sl { color: #d93025; }
     svg.candles { width: 100%; height: auto; display: block; border: 1px solid #f0f0f0; border-radius: 4px; }
     .chart-none { color: #999; font-size: 0.85em; padding: 20px; text-align: center; }
+    .pick-list { margin-top: 15px; }
+    .pick-list .chart-card { margin-bottom: 14px; max-width: 640px; }
+    .chart-card .ttl .res { margin-left: 6px; font-size: 0.9em; }
     .legend { font-size: 0.78em; color: #777; margin: 6px 0 0; }
-    .legend .up { color: #e53935; font-weight: 700; } .legend .dn { color: #1e88e5; font-weight: 700; }
+    .legend .up { color: #1e88e5; font-weight: 700; } .legend .dn { color: #e53935; font-weight: 700; }
+    @media (max-width: 640px) {
+      .wrap { padding: 10px; }
+      h1 { font-size: 1.2em; } h2 { font-size: 1.05em; }
+      .nav { gap: 4px; padding: 6px 8px; }
+      .nav a { font-size: 0.8em; padding: 5px 8px; }
+      .tablewrap { overflow-x: visible; }
+      /* 表を縦積みカード化（横スクロール廃止） */
+      table { font-size: 0.92em; box-shadow: none; background: transparent; border-radius: 0; }
+      thead { position: absolute; left: -9999px; top: -9999px; }
+      table, tbody, tr, td { display: block; width: 100%; box-sizing: border-box; }
+      tr { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-bottom: 10px; padding: 4px 12px; }
+      tr:hover { background: #fff; }
+      td { text-align: right; white-space: normal; border-bottom: 1px dashed #eee; padding: 8px 0; padding-left: 44%; position: relative; }
+      td:last-child { border-bottom: none; }
+      td::before { content: attr(data-label); position: absolute; left: 0; width: 42%; text-align: left; color: #888; font-weight: 600; white-space: normal; }
+      .chart-grid { grid-template-columns: 1fr; gap: 12px; }
+      .strategy-container { grid-template-columns: 1fr; }
+    }
 """
 
 # クリックで昇順↔降順に並び替え（数値/日付は数値として、それ以外は文字列として比較）
 SORT_SCRIPT = """
 <script>
 document.querySelectorAll('table').forEach(function(tbl){
+  // スマホ縦積み用：各セルに見出しラベルを付与
+  var hs = Array.prototype.map.call(tbl.querySelectorAll('thead th'), function(th){
+    return th.textContent.replace(/[\\u2191\\u2193\\u2195]/g,'').trim();
+  });
+  function relabel(){
+    tbl.querySelectorAll('tbody tr').forEach(function(tr){
+      Array.prototype.forEach.call(tr.cells, function(td,i){
+        if (hs[i] !== undefined) td.setAttribute('data-label', hs[i]);
+      });
+    });
+  }
+  relabel();
   var ths = tbl.querySelectorAll('thead th[data-sortable]');
   ths.forEach(function(th, idx){
     var col = th.cellIndex;
@@ -101,9 +134,10 @@ document.querySelectorAll('table').forEach(function(tbl){
 """
 
 
-def _candles_svg(dfc, buy=None, tp=None, sl=None, months=6):
-    """1銘柄の日足ローソクを SVG で描画（直近~6か月）。
-    dfc: code の株価（date, open, high, low, close を含む）。外部JS不使用。"""
+def _candles_svg(dfc, buy=None, tp=None, sl=None, months=6, mark_date=None):
+    """1銘柄の日足ローソク＋出来高棒を SVG で描画（直近~6か月）。
+    dfc: code の株価（date, open, high, low, close, volume を含む）。外部JS不使用。
+    mark_date: 指定するとその日付（推奨日）に縦線＋買い点の丸印を描く。"""
     if dfc is None or len(dfc) == 0:
         return '<div class="chart-none">チャートデータなし</div>'
     d = dfc.sort_values("date")
@@ -116,20 +150,50 @@ def _candles_svg(dfc, buy=None, tp=None, sl=None, months=6):
     h = d["high"].to_numpy(dtype=float)
     lo = d["low"].to_numpy(dtype=float)
     c = d["close"].to_numpy(dtype=float)
+    vol = d["volume"].to_numpy(dtype=float) if "volume" in d.columns else None
     m = len(c)
     if m == 0:
         return '<div class="chart-none">チャートデータなし</div>'
 
-    W, H = 560.0, 200.0
+    W, H = 560.0, 240.0
     padL, padR, padT, padB = 6.0, 52.0, 8.0, 16.0
+    priceH, gap, volH = 150.0, 12.0, 54.0   # 上=価格 / 下=出来高
+    priceTop = padT
+    priceBot = padT + priceH
+    volTop = priceBot + gap
+    volBot = volTop + volH
     plotW = W - padL - padR
-    plotH = H - padT - padB
+
+    # 推奨日の位置を特定
+    mark_i = None
+    if mark_date is not None:
+        try:
+            md = pd.Timestamp(mark_date)
+            for i, t in enumerate(d["date"]):
+                if pd.Timestamp(t) >= md:
+                    mark_i = i
+                    break
+        except Exception:
+            mark_i = None
+
+    # 株式分割などで記録時と現在のスケールがズレた場合に、買い/利確/損切りを
+    # チャートの推奨日終値に合わせて補正（通常は scale≈1 で変化なし）
+    scale = 1.0
+    if mark_i is not None and buy is not None and buy == buy and float(buy) > 0:
+        rc = c[mark_i]
+        if rc == rc and rc > 0:
+            s = rc / float(buy)
+            if abs(s - 1.0) > 0.08:   # 8%以上ズレ＝分割等とみなし補正
+                scale = s
+    buy_d = float(buy) * scale if (buy is not None and buy == buy) else None
+    tp_d = float(tp) * scale if (tp is not None and tp == tp) else None
+    sl_d = float(sl) * scale if (sl is not None and sl == sl) else None
 
     lows = [x for x in lo if x == x]
     highs = [x for x in h if x == x]
     pmin = min(lows) if lows else 0.0
     pmax = max(highs) if highs else 1.0
-    for v in (buy, tp, sl):
+    for v in (buy_d, tp_d, sl_d):
         if v is not None and v == v:
             pmin = min(pmin, float(v)); pmax = max(pmax, float(v))
     if pmax <= pmin:
@@ -137,17 +201,17 @@ def _candles_svg(dfc, buy=None, tp=None, sl=None, months=6):
     rng = pmax - pmin
 
     def y(p):
-        return padT + (pmax - p) / rng * plotH
+        return priceTop + (pmax - p) / rng * priceH
 
     step = plotW / m
     bw = max(1.2, min(6.0, step * 0.65))
-    up, down = "#e53935", "#1e88e5"  # 陽線=赤 / 陰線=青（日本式）
+    up, down = "#1e88e5", "#e53935"  # 陽線=青 / 陰線=赤（＋が青）
 
     parts = [f'<svg viewBox="0 0 {W:.0f} {H:.0f}" class="candles" '
              f'preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">']
     parts.append(f'<rect x="0" y="0" width="{W:.0f}" height="{H:.0f}" fill="#fff"/>')
 
-    # 補助線・目盛（上・中・下）
+    # 価格の補助線・目盛（上・中・下）
     for frac in (0.0, 0.5, 1.0):
         pv = pmax - frac * rng
         yy = y(pv)
@@ -155,7 +219,23 @@ def _candles_svg(dfc, buy=None, tp=None, sl=None, months=6):
                      f'stroke="#eee" stroke-width="1"/>')
         parts.append(f'<text x="{padL+plotW+4:.1f}" y="{yy+3:.1f}" font-size="9" fill="#999">{pv:,.0f}</text>')
 
-    # ローソク
+    # 出来高の棒グラフ（下段）
+    if vol is not None:
+        vmax = max([x for x in vol if x == x] or [1.0])
+        if vmax <= 0:
+            vmax = 1.0
+        parts.append(f'<text x="{padL+plotW+4:.1f}" y="{volTop+8:.1f}" font-size="8" fill="#bbb">出来高</text>')
+        for i in range(m):
+            vi = vol[i]
+            if not (vi == vi):
+                continue
+            bh = (vi / vmax) * volH
+            cx = padL + i * step + step / 2.0
+            col = up if (c[i] >= o[i]) else down
+            parts.append(f'<rect x="{cx-bw/2:.1f}" y="{volBot-bh:.1f}" width="{bw:.1f}" height="{bh:.1f}" '
+                         f'fill="{col}" opacity="0.45"/>')
+
+    # ローソク（上段）
     for i in range(m):
         cx = padL + i * step + step / 2.0
         oi, hi, li, ci = o[i], h[i], lo[i], c[i]
@@ -176,9 +256,20 @@ def _candles_svg(dfc, buy=None, tp=None, sl=None, months=6):
         parts.append(f'<line x1="{padL:.1f}" y1="{yy:.1f}" x2="{padL+plotW:.1f}" y2="{yy:.1f}" '
                      f'stroke="{color}" stroke-width="1" stroke-dasharray="4 3"/>')
         parts.append(f'<text x="{padL+2:.1f}" y="{yy-2:.1f}" font-size="9" fill="{color}">{label}</text>')
-    hline(tp, "#137333", "利確")
-    hline(buy, "#5f6368", "買い")
-    hline(sl, "#d93025", "損切り")
+    hline(tp_d, "#137333", "利確")
+    hline(buy_d, "#5f6368", "買い")
+    hline(sl_d, "#d93025", "損切り")
+
+    # 推奨日の縦線＋買い点の丸印
+    if mark_i is not None:
+        mx = padL + mark_i * step + step / 2.0
+        parts.append(f'<line x1="{mx:.1f}" y1="{priceTop:.1f}" x2="{mx:.1f}" y2="{volBot:.1f}" '
+                     f'stroke="#9c27b0" stroke-width="1.4" stroke-dasharray="3 2"/>')
+        parts.append(f'<text x="{mx+2:.1f}" y="{priceTop+9:.1f}" font-size="9" fill="#9c27b0" font-weight="bold">推奨</text>')
+        # 買い値に丸印（＝ここで買った点。推奨日の終値に乗る）
+        if buy_d is not None:
+            parts.append(f'<circle cx="{mx:.1f}" cy="{y(buy_d):.1f}" r="3.2" '
+                         f'fill="#9c27b0" stroke="#fff" stroke-width="1"/>')
 
     parts.append("</svg>")
     return "".join(parts)
@@ -265,7 +356,7 @@ def _build_index(df, target_date, quotes=None):
                     '<span class="dn">■</span> 陰線（終値&lt;始値）　'
                     '／ 点線：<span style="color:#5f6368">買い</span>・'
                     '<span style="color:#137333">利確+10%</span>・'
-                    '<span style="color:#d93025">損切り-5%</span></p>')
+                    '<span style="color:#d93025">損切り-5%</span>　／ 下段＝出来高</p>')
         if quotes is not None and not quotes.empty:
             qs = quotes.copy()
             qs["code"] = qs["code"].astype(str)
@@ -310,7 +401,7 @@ def _build_index(df, target_date, quotes=None):
 
 
 # ---- 推奨のその後ページ（results.html）--------------------------------
-def _build_results(tracked):
+def _build_results(tracked, quotes=None):
     now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
     body = ['<h1>📈 推奨のその後（実績）</h1>',
             f'<div class="date-badge">更新: {now}</div>']
@@ -332,29 +423,57 @@ def _build_results(tracked):
                 f'勝率 <b>{wr}</b>）／追跡中: <b>{n_track}件</b></div>')
 
     tracked = tracked.sort_values("推奨日", ascending=False)
-    head = ["推奨日","銘柄名","区分","買い指値","利確","損切り","最新時点%","最大%","最小%","結果"]
-    thead = "".join(f'<th data-sortable>{_esc(h)}</th>' for h in head)
-    rows = []
+
+    # --- 1社ごとに「情報 → その銘柄のチャート」を縦に並べる（推奨日を縦線で表示）---
+    body.append('<p class="legend"><span class="up">■</span> 陽線（終値≥始値）　'
+                '<span class="dn">■</span> 陰線（終値&lt;始値）　／ '
+                '点線：<span style="color:#5f6368">買い</span>・'
+                '<span style="color:#137333">利確</span>・'
+                '<span style="color:#d93025">損切り</span>　／ '
+                '<span style="color:#9c27b0;font-weight:700">縦線＝推奨日・●＝買った値</span>'
+                '　／ 下段＝出来高</p>')
+
+    qs = None
+    if quotes is not None and not quotes.empty:
+        qs = quotes.copy()
+        qs["code"] = qs["code"].astype(str)
+        by_code = {code: g for code, g in qs.groupby("code")}
+
+    def num(v):
+        return "" if v is None or (isinstance(v, float) and v != v) else v
+
+    items = []
     for _, r in tracked.iterrows():
-        res = str(r["結果"])
-        cls = "win" if "利確" in res else ("lose" if "損切り" in res else "track")
-        def num(v):
-            return "" if v is None or (isinstance(v, float) and v != v) else v
-        rows.append(
-            "<tr>"
-            f'<td>{_esc(r["推奨日"])}</td>'
-            f'<td>{_esc(r["銘柄名"])}<br><span style="color:#999;font-size:0.85em">{_esc(r["code"])}</span></td>'
-            f'<td>{_esc(r.get("区分",""))}</td>'
-            f'<td data-v="{r["買い指値"]}">{r["買い指値"]:,.1f}</td>'
-            f'<td data-v="{r["利確"]}">{r["利確"]:,.1f}</td>'
-            f'<td data-v="{r["損切り"]}">{r["損切り"]:,.1f}</td>'
-            f'<td data-v="{num(r.get("最新時点%"))}">{_esc(num(r.get("最新時点%")))}</td>'
-            f'<td data-v="{num(r.get("現在まで最大%"))}">{_esc(num(r.get("現在まで最大%")))}</td>'
-            f'<td data-v="{num(r.get("現在まで最小%"))}">{_esc(num(r.get("現在まで最小%")))}</td>'
-            f'<td><span class="{cls}">{_esc(res)}</span></td>'
-            "</tr>")
-    body.append(f'<div class="tablewrap"><table><thead><tr>{thead}</tr></thead>'
-                f'<tbody>{"".join(rows)}</tbody></table></div>')
+        try:
+            code = str(r["code"])
+            res = str(r["結果"])
+            rcls = "win" if "利確" in res else ("lose" if "損切り" in res else "track")
+            # チャート
+            svg = '<div class="chart-none">チャート用の株価データがありません</div>'
+            if qs is not None:
+                dfc = by_code.get(code)
+                if dfc is None:
+                    dfc = by_code.get(code[:4])
+                if dfc is None:
+                    dfc = by_code.get(code + "0")
+                svg = _candles_svg(dfc, buy=r.get("買い指値"), tp=r.get("利確"),
+                                   sl=r.get("損切り"), mark_date=r.get("推奨日"))
+            items.append(
+                '<div class="chart-card">'
+                f'<div class="ttl">{_esc(r["銘柄名"])} <span style="color:#999">({_esc(code)})</span>'
+                f'<span class="res {rcls}">{_esc(res)}</span></div>'
+                f'<div class="sub">推奨日 {_esc(r["推奨日"])}｜{_esc(r.get("区分",""))}　'
+                f'最新 {_esc(num(r.get("最新時点%")))}%・最大 {_esc(num(r.get("現在まで最大%")))}%'
+                f'・最小 {_esc(num(r.get("現在まで最小%")))}%</div>'
+                f'<div class="px"><b>買い {r["買い指値"]:,.1f}円</b>　'
+                f'<span class="tp">利確 {r["利確"]:,.1f}円</span>　'
+                f'<span class="sl">損切 {r["損切り"]:,.1f}円</span></div>'
+                f'{svg}'
+                '</div>')
+        except Exception as e:
+            items.append(f'<div class="chart-card"><div class="chart-none">生成エラー: {_esc(e)}</div></div>')
+    body.append(f'<div class="pick-list">{"".join(items)}</div>')
+
     body.append('<div class="note">※ 買い指値＝推奨日の終値。翌日その値で約定できたと仮定した追跡です。'
                 '利確+10%・損切り-5%は終値ベース、到達順で先に来たほうを結果とします。'
                 '記録開始より前の推奨は復元できません。手数料・スリッページ未考慮・投資助言ではありません。</div>')
@@ -463,7 +582,7 @@ def generate_web_report(df=None, quotes=None, target_date=None, listed=None):
     except Exception as e:
         print(f"  追跡でエラー（実績ページは前回内容/空で継続）: {e}")
     with open(os.path.join(DOCS, "results.html"), "w", encoding="utf-8") as f:
-        f.write(_build_results(tracked))
+        f.write(_build_results(tracked, quotes))
     print(f"  docs/results.html を生成しました")
 
     # recent.html（過去10日の推奨）
