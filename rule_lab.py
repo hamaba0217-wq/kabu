@@ -442,6 +442,33 @@ def today_signals(q, conds, last_date):
     return s.sort_values("tv20", ascending=False).head(30)
 
 
+def single_report(q, edges, base):
+    """要因1つずつの成績（研究用）。基準（条件なし）との差を記録"""
+    out = []
+    for f, lst in GRID.items():
+        for op, th in lst:
+            r = evaluate(q, [[f, op, th]], edges)
+            if not r.get("n"):
+                continue
+            sp = [x["win"] for x in r["splits"] if x["win"] is not None]
+            out.append({"cond": [f, op, th], "label": fmt_cond(f, op, th), "n": r["n"],
+                        "win": r["win"], "pnl": r["pnl"], "lift": r["win"] - base["win"],
+                        "min_split_win": min(sp) if sp else None})
+    out.sort(key=lambda x: -x["lift"])
+    return out
+
+
+def write_feature_report(state):
+    rows = state.get("singles") or []
+    md = ["# 要因別の成績（1か月以内+10%到達）", "",
+          f"更新 {state['updated']} ／ 基準（流動性条件のみ）勝率 {pct(state['baseline'].get('win'))}", "",
+          "| 条件 | 取引数 | 勝率 | 基準との差 | 最悪期間の勝率 | 平均損益 |", "|---|---|---|---|---|---|"]
+    for r in rows:
+        md.append(f"| {r['label']} | {r['n']} | {pct(r['win'])} | {r['lift']*100:+.1f}pt | "
+                  f"{pct(r['min_split_win'])} | {pct(r['pnl'],2)} |")
+    open(os.path.join("rules", "feature_report.md"), "w", encoding="utf-8").write("\n".join(md))
+
+
 def write_outputs(state, q, last_date):
     os.makedirs("rules", exist_ok=True)
     champ = state["champion"]
@@ -534,7 +561,8 @@ def git_push(msg):
         r = subprocess.run(["git", *a], capture_output=True, text=True)
         print("git", " ".join(a), "->", r.returncode, (r.stdout + r.stderr).strip()[:300])
         return r.returncode
-    run("add", *[p for p in (RULES_MD, RULES_HTML, STATE) if os.path.exists(p)])
+    run("add", *[p for p in (RULES_MD, RULES_HTML, STATE, os.path.join("rules", "feature_report.md"))
+                 if os.path.exists(p)])
     if run("commit", "-m", msg) != 0:
         return
     run("pull", "--rebase", "-X", "theirs", "origin", "main")
@@ -567,6 +595,13 @@ def main():
     state["champion"] = champ
     print(f"基準(条件なし) 勝率 {pct(base['win'])} n={base['n']} / 現ルール 勝率 {pct(champ['win'])} n={champ['n']}")
 
+    if state.get("singles_date") != str(last_date.date()):
+        state["singles"] = single_report(q, edges, base)
+        state["singles_date"] = str(last_date.date())
+        state["updated"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        os.makedirs("rules", exist_ok=True)
+        write_feature_report(state)
+        print(f"要因別レポート更新（{len(state['singles'])}条件）")
     cands = candidates(champ["conds"], state["tested"])[:BATCH]
     print(f"今回テスト: {len(cands)} ルール")
     improved = False
