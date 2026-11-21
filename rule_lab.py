@@ -161,6 +161,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         ctx = ctx.join(al)
     ctx["month"] = ctx.index.month
     ctx["dow"] = ctx.index.dayofweek
+    ctx["dom"] = ctx.index.day                                         # 仮説(2026-11-21 2回目)：月末・月初効果
     ctx.index.name = "date"
     q = q.merge(ctx.reset_index(), on="date", how="left")
     # --- 業種内での相対的な強さ ---
@@ -222,6 +223,11 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["vdry"] = v5 / v60.replace(0, np.nan)
     phi = g["high"].transform(lambda s: s.shift(1).rolling(250, min_periods=120).max())
     q["new_hi"] = (c > phi).astype(float).where(phi.notna())
+    # 仮説(2026-11-21 2回目)：値幅の収縮・75日線の傾き（t 終値時点で確定）
+    h20 = g["high"].transform(lambda s: s.rolling(20, min_periods=20).max())
+    l20 = g["low"].transform(lambda s: s.rolling(20, min_periods=20).min())
+    q["rng20"] = (h20 - l20) / c
+    q["ma75_slope"] = q["ma75"] / q.groupby("code", sort=False)["ma75"].shift(20) - 1
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -294,6 +300,10 @@ GRID = {
     "up_streak": [(">=", 3), (">=", 5)],
     "vdry":      [("<=", 0.5), ("<=", 0.7), (">=", 1.5)],
     "new_hi":    [(">=", 1)],
+    # 仮説(2026-11-21 2回目)
+    "rng20":     [("<=", 0.08), ("<=", 0.12), (">=", 0.40)],
+    "ma75_slope": [(">=", 0.03), (">=", 0.08), ("<=", -0.03)],
+    "dom":       [("<=", 5), (">=", 25)],
 }
 
 LABEL = {
@@ -312,6 +322,7 @@ LABEL = {
     "wti_ret20": "原油(WTI)の20日騰落", "sp500_ret1": "前夜のS&P500", "sp500_ret20": "S&P500の20日騰落",
     "nasdaq_ret5": "NASDAQの5日騰落", "month": "月", "dow": "曜日", "since_disc": "直近の決算発表からの日数",
     "up_streak": "連続陽線の日数", "vdry": "出来高の枯れ(5日平均/前60日平均)", "new_hi": "52週高値を終値で更新",
+    "rng20": "20日の値幅(高値-安値)/株価", "ma75_slope": "75日線の20日間の傾き", "dom": "日付(月の何日)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -331,6 +342,8 @@ def fmt_cond(f, op, th):
         return f"{int(th)}月"
     if f == "dow":
         return f"{DOW[int(th)]}曜日"
+    if f == "dom":
+        return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
     if f == "breadth":
