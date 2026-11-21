@@ -565,6 +565,13 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     tv_ = q["turnover_value"] if "turnover_value" in q.columns else q["close"] * q["volume"]
     gtv = tv_.groupby(q["code"])
     q["tv5_60"] = gtv.transform(lambda s: s.rolling(5, min_periods=5).mean()) / gtv.transform(lambda s: s.rolling(60, min_periods=40).mean()).replace(0, np.nan)
+    # 仮説(2026-11-22 32回目)：値幅の収縮＝直近5日の(高値最大-安値最小)/直近20日の同値（急落後に値動きが落ち着いたか＝売りの一巡）・
+    # 5日線乖離（短期の戻り始めか、まだ下げの途中か）。すべて t 終値時点で確定
+    gh_ = q.groupby("code", sort=False)["high"]; gl_ = q.groupby("code", sort=False)["low"]
+    r5_ = gh_.transform(lambda s: s.rolling(5, min_periods=5).max()) - gl_.transform(lambda s: s.rolling(5, min_periods=5).min())
+    r20_ = gh_.transform(lambda s: s.rolling(20, min_periods=20).max()) - gl_.transform(lambda s: s.rolling(20, min_periods=20).min())
+    q["rng5_20"] = r5_ / r20_.replace(0, np.nan)
+    q["dev5"] = q["close"] / q.groupby("code", sort=False)["close"].transform(lambda s: s.rolling(5, min_periods=5).mean()) - 1
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -754,6 +761,8 @@ GRID = {
     "sec_up_frac": [(">=", 0.7), (">=", 0.5), ("<=", 0.3)],
     "min1_days": [("<=", 2), ("<=", 5), (">=", 12)],
     "tv5_60":    [(">=", 2.0), (">=", 1.5), ("<=", 0.8)],
+    "rng5_20":   [("<=", 0.3), ("<=", 0.45), (">=", 0.8)],
+    "dev5":      [(">=", 0.03), (">=", 0.0), ("<=", -0.03)],
 }
 
 LABEL = {
@@ -815,6 +824,7 @@ LABEL = {
     "bounce_rel": "60日安値からの戻り−業種の中央値", "sec_tv_rank": "業種内の売買代金の順位(1=最大)",
     "sec_up_frac": "当日に上げた業種内の銘柄の割合",
     "min1_days": "直近20日の最大の日次下落からの経過日数", "tv5_60": "売買代金の5日平均/60日平均",
+    "rng5_20": "直近5日の値幅/直近20日の値幅", "dev5": "5日線乖離",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -850,7 +860,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
