@@ -316,6 +316,18 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     q["sec_vratio"] = q.groupby(["date", "sector"])["vratio"].transform("median")
     q["mkt_vratio"] = q.groupby("date")["vratio"].transform("median")
     q["sec_crash"] = (q["ret20"] <= -0.15).astype(float).where(q["ret20"].notna()).groupby([q["date"], q["sector"]]).transform("mean")
+    # 仮説(2026-11-21 22回目)：業種ぐるみの急落の進み方＝同業種の急落割合の5日変化、20日の最大に対する現在の比（ピークアウト）
+    scs = q.groupby(["sector", "date"])["sec_crash"].first().sort_index()
+    scg = scs.groupby(level=0)
+    scmax = scg.transform(lambda z: z.rolling(20, min_periods=10).max())
+    sc = pd.DataFrame({"sec_crash_chg5": scs - scg.shift(5),
+                       "sec_crash_pk": scs / scmax.replace(0, np.nan)}).reset_index()
+    q = q.merge(sc, on=["sector", "date"], how="left")
+    # 仮説(2026-11-21 22回目)：業種の大型株（時価総額上位3銘柄）の5日騰落の平均＝業種の主力株が先に戻り始めたか
+    if "mcap" in q.columns:
+        rk = q.groupby(["date", "sector"])["mcap"].rank(ascending=False, method="first")
+        q["sec_big5"] = q["ret5"].where(rk <= 3).groupby([q["date"], q["sector"]]).transform("mean")
+        q["big_gap5"] = q["sec_big5"] - q["ret5"]
     q = q.drop(columns=["sec20_prev"])
     # 仮説(2026-11-21 9回目)：市場との連動（60日ベータ）・為替感応度（円安と株価の60日相関）
     q = q.sort_values(["code", "date"]).reset_index(drop=True)
@@ -580,6 +592,11 @@ GRID = {
     "ret250":    [(">=", 0.30), (">=", 0.0), ("<=", -0.20)],
     "min1_20":   [("<=", -0.10), ("<=", -0.06), (">=", -0.025)],
     "ud_vol20":  [(">=", 1.5), ("<=", 0.6), ("<=", 0.4)],
+    # 仮説(2026-11-21 22回目)：業種ぐるみの急落の進み方・業種の大型株の戻り
+    "sec_crash_chg5": [(">=", 0.10), (">=", 0.05), ("<=", -0.05)],
+    "sec_crash_pk":   [("<=", 0.5), ("<=", 0.8), (">=", 1)],
+    "sec_big5":  [(">=", 0.03), ("<=", -0.03), ("<=", -0.06)],
+    "big_gap5":  [(">=", 0.08), (">=", 0.04), ("<=", -0.03)],
 }
 
 LABEL = {
@@ -619,6 +636,8 @@ LABEL = {
     "sec_vratio": "業種全体の出来高倍率(中央値)", "mkt_vratio": "市場全体の出来高倍率(中央値)",
     "jp_rel5": "日本株の米国株に対する5日騰落の差",
     "ret250": "250日騰落(長期の勢い)", "min1_20": "直近20日の最大の日次下落率", "ud_vol20": "上昇日/下落日の出来高比(20日)",
+    "sec_crash_chg5": "同業種の急落割合の5日変化", "sec_crash_pk": "同業種の急落割合の20日最大に対する比",
+    "sec_big5": "業種の大型株(時価総額上位3)の5日騰落", "big_gap5": "業種の大型株の5日騰落-その銘柄の5日騰落",
 }
 POINT_FEATS = {"vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -654,7 +673,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
