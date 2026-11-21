@@ -652,6 +652,19 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         vr = vr.where(vidx != k, r1s[k])
     q["vmax_ret"] = vr
     q["ret10"] = q.groupby("code", sort=False)["close"].transform(lambda s: s / s.shift(10) - 1)
+    # 仮説(2026-11-22 40回目)：物色の向き（小型株-大型株の5日騰落の差＝規模のローテーション、低PBR-高PBRの20日騰落の差＝割安株の
+    # ローテーション）と、20日騰落の全銘柄内の順位（その日の相場に対する相対的な下げの深さ）。すべて t 終値時点で確定
+    def _spread(col, key, lo=0.3, hi=0.7):
+        if key not in q.columns:
+            return pd.Series(np.nan, index=q.index)
+        k = q[key].where(q[key] > 0)
+        r = k.groupby(q["date"]).rank(pct=True)
+        a_ = q[col].where(r <= lo).groupby(q["date"]).transform("median")
+        b_ = q[col].where(r >= hi).groupby(q["date"]).transform("median")
+        return a_ - b_
+    q["size_sp5"] = _spread("ret5", "mcap")
+    q["val_sp20"] = _spread("ret20", "pbr")
+    q["ret20_xr"] = q.groupby("date")["ret20"].rank(pct=True)
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -865,6 +878,9 @@ GRID = {
     "vmax_ret": [("<=", -0.05), ("<=", -0.02), (">=", 0.02)],
     "vmax_days": [("<=", 2), ("<=", 6), (">=", 12)],
     "ret10": [("<=", -0.15), ("<=", -0.08), (">=", 0.05)],
+    "size_sp5": [("<=", -0.02), ("<=", -0.01), (">=", 0.01)],
+    "val_sp20": [("<=", -0.03), (">=", 0.02), (">=", 0.04)],
+    "ret20_xr": [("<=", 0.02), ("<=", 0.05), (">=", 0.95)],
 }
 
 LABEL = {
@@ -939,6 +955,8 @@ LABEL = {
     "jp_us_dd": "日本株と米国株の60日高値からの下落の差",
     "vmax_ret": "直近20日で出来高最大の日の騰落", "vmax_days": "直近20日で出来高最大の日からの経過日数",
     "ret10": "10日騰落",
+    "size_sp5": "小型株-大型株の5日騰落の差(時価総額の下位3割-上位3割)", "val_sp20": "低PBR株-高PBR株の20日騰落の差(下位3割-上位3割)",
+    "ret20_xr": "20日騰落の全銘柄内の順位(0=最も下げた)",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -974,7 +992,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
