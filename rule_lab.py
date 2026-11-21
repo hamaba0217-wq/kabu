@@ -165,6 +165,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["usdjpy_ret5"] = m["usdjpy"].pct_change(5)                    # 仮説(17回目)：為替の短期の急変（円高・円安ショック）
         x["usdjpy_ret1"] = m["usdjpy"].pct_change(1)                    # 為替感応度の計算用（GRIDには入れない）
         x["vix_rel60"] = m["vix"] / m["vix"].rolling(60, min_periods=40).mean()   # 仮説(18回目)：VIXの60日平均に対する水準
+        x["vix_chg1"] = m["vix"].diff()                                    # 仮説(20回目)：VIXの1日変化（急騰後の反落＝不安のピークアウト）
         x["spread_chg20"] = (m["us10y"] - m["jgb10y"]) - (m["us10y"] - m["jgb10y"]).shift(20)   # 仮説(19回目)：日米10年金利差の20日変化
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
@@ -306,6 +307,8 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     sd = q.groupby(["sector", "date"])["sec20"].first().groupby(level=0).shift(20).rename("sec20_prev").reset_index()
     q = q.merge(sd, on=["sector", "date"], how="left")
     q["sec_turn"] = q["sec20"] - q["sec20_prev"]
+    # 仮説(2026-11-21 20回目)：業種ぐるみの急落＝同じ業種で20日騰落が-15%以下の銘柄の割合
+    q["sec_crash"] = (q["ret20"] <= -0.15).astype(float).where(q["ret20"].notna()).groupby([q["date"], q["sector"]]).transform("mean")
     q = q.drop(columns=["sec20_prev"])
     # 仮説(2026-11-21 9回目)：市場との連動（60日ベータ）・為替感応度（円安と株価の60日相関）
     q = q.sort_values(["code", "date"]).reset_index(drop=True)
@@ -411,6 +414,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     MFG = {"食料品", "繊維製品", "パルプ･紙", "化学", "医薬品", "石油･石炭製品", "ゴム製品", "ガラス･土石製品", "鉄鋼",
            "非鉄金属", "金属製品", "機械", "電気機器", "輸送用機器", "精密機器", "その他製品"}
     q["mfg"] = q["sector"].isin(MFG).astype(float).where(q["sector"].notna()) if "sector" in q.columns else np.nan
+    # 仮説(2026-11-21 20回目)：20日高値からの経過日数（下げの速さ。少ないほど急な下げ）
+    q["days_hi20"] = g["high"].transform(lambda s: s.rolling(20, min_periods=20).apply(lambda a: 19 - np.argmax(a), raw=True))
     plo = g["low"].transform(lambda s: s.shift(1).rolling(250, min_periods=120).min())
     q["new_lo"] = (c < plo).astype(float).where(plo.notna())
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
@@ -546,6 +551,10 @@ GRID = {
     "new_lo":    [(">=", 1)],
     "op_yoy":    [(">=", 0.30), (">=", 0.10), ("<=", -0.20)],
     "mfg":       [(">=", 1), ("<=", 0)],
+    # 仮説(2026-11-21 20回目)：VIXのピークアウト・業種ぐるみの急落・下げの速さ
+    "vix_chg1":  [("<=", -1), ("<=", -2), (">=", 2)],
+    "sec_crash": [(">=", 0.30), (">=", 0.15), ("<=", 0.02)],
+    "days_hi20": [("<=", 5), ("<=", 10), (">=", 15)],
 }
 
 LABEL = {
@@ -580,8 +589,9 @@ LABEL = {
     "idio20": "市場要因を除いた20日騰落(ベータ調整)", "frac_crash": "20日騰落-20%以下の銘柄の割合(市場全体)", "spread_chg20": "日米10年金利差の20日変化(%pt)",
     "mkt_gap": "市場全体の窓(全銘柄の窓の中央値)", "new_lo": "52週安値を終値で割り込み", "op_yoy": "営業利益の前年同期比(直近の決算)",
     "mfg": "製造業(東証33業種)",
+    "vix_chg1": "VIXの1日変化(前日・ポイント)", "sec_crash": "同業種で20日騰落-15%以下の銘柄の割合", "days_hi20": "20日高値からの経過日数",
 }
-POINT_FEATS = {"spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
+POINT_FEATS = {"vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
 
 
@@ -600,6 +610,8 @@ def fmt_cond(f, op, th):
     if f == "dow":
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
+        return f"{lab} {op} {th:g}日"
+    if f == "days_hi20":
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
