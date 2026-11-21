@@ -155,6 +155,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["sp500_ret20"] = m["sp500"].pct_change(20)
         x["nasdaq_ret5"] = m["nasdaq"].pct_change(5)
         x["us_dd60"] = m["sp500"] / m["sp500"].rolling(60, min_periods=40).max() - 1   # 仮説(14回目)：米国株の60日高値からの下落
+        x["usdjpy_ret5"] = m["usdjpy"].pct_change(5)                    # 仮説(17回目)：為替の短期の急変（円高・円安ショック）
         x["usdjpy_ret1"] = m["usdjpy"].pct_change(1)                    # 為替感応度の計算用（GRIDには入れない）
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
@@ -370,6 +371,9 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["intra20"] = np.expm1(lg_in.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=20).sum()))
     # 仮説(2026-11-21 16回目)：夜間騰落の短期版（5日累計）。直近の寄り付きの売り込みを捉える（t 終値時点で確定）
     q["ovn5"] = np.expm1(lg_on.groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=5).sum()))
+    # 仮説(2026-11-21 17回目)：上向きの反転足＝前日が下落し、当日の終値が前日の高値を上回る（t 終値時点で確定）
+    ph = g["high"].shift(1)
+    q["rev_up"] = ((c > ph) & (g["close"].shift(1) < g["close"].shift(2))).astype(float).where(ph.notna())
     # 仮説(2026-11-21 15回目)：市場全体の荒れ具合＝その日の全銘柄の騰落のばらつき（標準偏差）の5日平均
     xd = q.groupby("date")["ret1"].std().sort_index().rolling(5, min_periods=5).mean().rename("xs_disp5")
     q = q.merge(xd, on="date", how="left")
@@ -392,6 +396,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["pnl"] = np.where(q["win"] == 1, TP, q["fclose"] / q["buy"] - 1)
     q["dd10"] = (q["fmin"] <= q["buy"] * 0.90).astype(float)
     q.loc[q["fclose"].isna() | q["buy"].isna(), ["win", "pnl", "dd10"]] = np.nan
+    # 仮説(2026-11-21 17回目)：その銘柄の過去の+10%到達のしやすさ＝t-20 日以前に買った場合の勝ち（t 終値までに確定済み）の60日平均
+    q["hit_hist"] = q.groupby("code", sort=False)["win"].transform(lambda s: s.shift(HOLD).rolling(60, min_periods=40).mean())
     return q
 
 
@@ -488,6 +494,10 @@ GRID = {
     "ovn5":      [("<=", -0.06), ("<=", -0.04), ("<=", -0.025)],
     "xs_disp5":  [(">=", 0.03), ("<=", 0.018)],
     "fc_growth": [(">=", 0.20), (">=", 0.10), ("<=", -0.10)],
+    # 仮説(2026-11-21 17回目)
+    "usdjpy_ret5": [(">=", 0.015), ("<=", -0.015), ("<=", -0.01), ("<=", 0.0)],
+    "rev_up":    [(">=", 1)],
+    "hit_hist":  [(">=", 0.5), (">=", 0.3), ("<=", 0.05)],
 }
 
 LABEL = {
@@ -517,6 +527,7 @@ LABEL = {
     "disc_ret": "決算発表後の株価反応(発表前日比・20日以内)", "us_dd60": "S&P500の60日高値からの下落(前日)", "turn20": "売買の回転率(20日平均売買代金/時価総額)",
     "ovn20": "夜間(前日終値→始値)の20日累計騰落", "intra20": "日中(始値→終値)の20日累計騰落", "ovn5": "夜間(前日終値→始値)の5日累計騰落",
     "xs_disp5": "市場全体の騰落のばらつき(5日平均)", "fc_growth": "今期見通しの伸び(会社予想営業利益/前期実績)",
+    "usdjpy_ret5": "ドル円の5日変化(前日)", "rev_up": "上向きの反転足(前日下落・終値が前日高値超え)", "hit_hist": "過去の+10%到達率(確定済みの直近60回)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
