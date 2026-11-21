@@ -167,6 +167,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["vix_rel60"] = m["vix"] / m["vix"].rolling(60, min_periods=40).mean()   # 仮説(18回目)：VIXの60日平均に対する水準
         x["wti_ret5"] = m["wti"].pct_change(5)                             # 仮説(20回目2周目)：原油の短期の急変
         x["sp500_ret5"] = m["sp500"].pct_change(5)                         # 日本株の相対の弱さの計算用（GRIDには入れない）
+        x["wti_ret1"] = m["wti"].pct_change(1)                             # 原油感応度の計算用（GRIDには入れない）
         x["vix_chg1"] = m["vix"].diff()                                    # 仮説(20回目)：VIXの1日変化（急騰後の反落＝不安のピークアウト）
         # 仮説(22回目2周目)：米10年金利の短期の急変・VIXの20日最大に対する比（市場全体の不安のピークアウト）
         x["us10y_chg5"] = m["us10y"] - m["us10y"].shift(5)
@@ -401,6 +402,16 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         q["us_corr60"] = cxy / (sx * sf).replace(0, np.nan)
     else:
         q["us_corr60"] = np.nan
+    # 仮説(2026-11-22 38回目)：前日の原油(WTI)との60日相関（原油高で売られる/買われる銘柄か）。wti_ret1 は前日までの確定値
+    if "wti_ret1" in q.columns:
+        ok = x1.notna() & q["wti_ret1"].notna()
+        xa, fa = x1.where(ok), q["wti_ret1"].where(ok)
+        cxy = _roll(xa * fa) - _roll(xa) * _roll(fa)
+        sx = (_roll(xa * xa) - _roll(xa) ** 2).clip(lower=0) ** 0.5
+        sf = (_roll(fa * fa) - _roll(fa) ** 2).clip(lower=0) ** 0.5
+        q["oil_corr60"] = cxy / (sx * sf).replace(0, np.nan)
+    else:
+        q["oil_corr60"] = np.nan
     # 仮説(2026-11-21 19回目)：市場要因を除いた20日騰落＝20日騰落 − 60日ベータ×市場全体の20日騰落（個別の悪材料による下げ）
     q["idio20"] = q["ret20"] - q["beta60"].clip(-1, 3) * q["mkt20"]
     # 仮説(2026-11-21 19回目)：市場全体の投げ売り度＝20日騰落が-20%以下の銘柄の割合（t 終値で確定）
@@ -620,6 +631,15 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q = q.merge((ma25d - ma25d.shift(5)).rename("mkt_ab25_chg5"), on="date", how="left")
     gdn = (q["gap"] <= -0.02).astype(float).where(q["gap"].notna())
     q["gap_dn_cnt20"] = gdn.groupby(q["code"], sort=False).transform(lambda s: s.rolling(20, min_periods=20).sum())
+    # 仮説(2026-11-22 38回目)：業種内で25日線より上の割合の5日変化（業種の地合いが戻り始めたか）・
+    # 日本株と米国株の60日高値からの下落の差（日本固有の下げか）。t 終値・前夜までの確定値
+    if "sector" in q.columns:
+        sab = q.groupby(["date", "sector"])["sec_above25"].first().sort_index()
+        sch = (sab - sab.groupby(level=1).shift(5)).rename("sec_ab25_chg5").reset_index()
+        q = q.merge(sch, on=["date", "sector"], how="left")
+    else:
+        q["sec_ab25_chg5"] = np.nan
+    q["jp_us_dd"] = q["mkt_dd60"] - q["us_dd60"] if "us_dd60" in q.columns else np.nan
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -827,6 +847,9 @@ GRID = {
     "sec_pbr_rank": [("<=", 0.2), ("<=", 0.4), (">=", 0.8)],
     "mkt_ab25_chg5": [(">=", 0.15), (">=", 0.05), ("<=", -0.15)],
     "gap_dn_cnt20": [(">=", 4), (">=", 2), ("<=", 0)],
+    "oil_corr60": [(">=", 0.15), (">=", 0.05), ("<=", -0.1)],
+    "sec_ab25_chg5": [(">=", 0.2), (">=", 0.05), ("<=", -0.2)],
+    "jp_us_dd": [("<=", -0.08), ("<=", -0.04), (">=", 0.02)],
 }
 
 LABEL = {
@@ -897,6 +920,8 @@ LABEL = {
     "sec60_rank": "業種の60日騰落の業種間の順位(0=最も下げた)",
     "sec_pbr_rank": "業種内のPBRの順位(0=最も割安)", "mkt_ab25_chg5": "市場全体で25日線より上の割合の5日変化",
     "gap_dn_cnt20": "直近20日で窓≤-2%を開けて下げた日数",
+    "oil_corr60": "前日の原油(WTI)との60日相関", "sec_ab25_chg5": "業種内で25日線より上の割合の5日変化",
+    "jp_us_dd": "日本株と米国株の60日高値からの下落の差",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -932,7 +957,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
