@@ -165,6 +165,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["usdjpy_ret5"] = m["usdjpy"].pct_change(5)                    # 仮説(17回目)：為替の短期の急変（円高・円安ショック）
         x["usdjpy_ret1"] = m["usdjpy"].pct_change(1)                    # 為替感応度の計算用（GRIDには入れない）
         x["vix_rel60"] = m["vix"] / m["vix"].rolling(60, min_periods=40).mean()   # 仮説(18回目)：VIXの60日平均に対する水準
+        x["wti_ret5"] = m["wti"].pct_change(5)                             # 仮説(20回目2周目)：原油の短期の急変
         x["vix_chg1"] = m["vix"].diff()                                    # 仮説(20回目)：VIXの1日変化（急騰後の反落＝不安のピークアウト）
         x["spread_chg20"] = (m["us10y"] - m["jgb10y"]) - (m["us10y"] - m["jgb10y"]).shift(20)   # 仮説(19回目)：日米10年金利差の20日変化
         # 日付 t には「t より前の日付」の値を使う
@@ -308,6 +309,8 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     q = q.merge(sd, on=["sector", "date"], how="left")
     q["sec_turn"] = q["sec20"] - q["sec20_prev"]
     # 仮説(2026-11-21 20回目)：業種ぐるみの急落＝同じ業種で20日騰落が-15%以下の銘柄の割合
+    # 仮説(2026-11-21 20回目2周目)：業種全体のその日の騰落（中央値）＝業種の反発初日・続落
+    q["sec_ret1"] = q.groupby(["date", "sector"])["ret1"].transform("median")
     q["sec_crash"] = (q["ret20"] <= -0.15).astype(float).where(q["ret20"].notna()).groupby([q["date"], q["sector"]]).transform("mean")
     q = q.drop(columns=["sec20_prev"])
     # 仮説(2026-11-21 9回目)：市場との連動（60日ベータ）・為替感応度（円安と株価の60日相関）
@@ -555,6 +558,8 @@ GRID = {
     "vix_chg1":  [("<=", -1), ("<=", -2), (">=", 2)],
     "sec_crash": [(">=", 0.30), (">=", 0.15), ("<=", 0.02)],
     "days_hi20": [("<=", 5), ("<=", 10), (">=", 15)],
+    "sec_ret1":  [(">=", 0.02), (">=", 0.01), ("<=", -0.02)],
+    "wti_ret5":  [(">=", 0.05), ("<=", -0.05)],
 }
 
 LABEL = {
@@ -590,6 +595,7 @@ LABEL = {
     "mkt_gap": "市場全体の窓(全銘柄の窓の中央値)", "new_lo": "52週安値を終値で割り込み", "op_yoy": "営業利益の前年同期比(直近の決算)",
     "mfg": "製造業(東証33業種)",
     "vix_chg1": "VIXの1日変化(前日・ポイント)", "sec_crash": "同業種で20日騰落-15%以下の銘柄の割合", "days_hi20": "20日高値からの経過日数",
+    "sec_ret1": "業種全体の当日の騰落(中央値)", "wti_ret5": "原油(WTI)の5日騰落(前日)",
 }
 POINT_FEATS = {"vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
