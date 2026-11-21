@@ -228,6 +228,12 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     l20 = g["low"].transform(lambda s: s.rolling(20, min_periods=20).min())
     q["rng20"] = (h20 - l20) / c
     q["ma75_slope"] = q["ma75"] / q.groupby("code", sort=False)["ma75"].shift(20) - 1
+    # 仮説(2026-11-21 3回目)：下ヒゲ・直近20日の最大日次上昇・ゴールデンクロス直後（t 終値時点で確定）
+    q["shadow_lo"] = (np.minimum(o, c) - l) / c
+    q["max1_20"] = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(20, min_periods=15).max())
+    g2 = q.groupby("code", sort=False)
+    cross = (q["ma25"] > q["ma75"]) & (g2["ma25"].shift(1) <= g2["ma75"].shift(1))
+    q["gc5"] = cross.astype(float).groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=1).max()).where(q["ma75"].notna())
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -304,6 +310,10 @@ GRID = {
     "rng20":     [("<=", 0.08), ("<=", 0.12), (">=", 0.40)],
     "ma75_slope": [(">=", 0.03), (">=", 0.08), ("<=", -0.03)],
     "dom":       [("<=", 5), (">=", 25)],
+    # 仮説(2026-11-21 3回目)
+    "shadow_lo": [(">=", 0.02), (">=", 0.04)],
+    "max1_20":   [(">=", 0.08), (">=", 0.15), ("<=", 0.02)],
+    "gc5":       [(">=", 1)],
 }
 
 LABEL = {
@@ -323,6 +333,7 @@ LABEL = {
     "nasdaq_ret5": "NASDAQの5日騰落", "month": "月", "dow": "曜日", "since_disc": "直近の決算発表からの日数",
     "up_streak": "連続陽線の日数", "vdry": "出来高の枯れ(5日平均/前60日平均)", "new_hi": "52週高値を終値で更新",
     "rng20": "20日の値幅(高値-安値)/株価", "ma75_slope": "75日線の20日間の傾き", "dom": "日付(月の何日)",
+    "shadow_lo": "下ヒゲの長さ/株価", "max1_20": "直近20日の最大の日次上昇率", "gc5": "25日線が75日線を上抜けて5日以内",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -330,7 +341,7 @@ DOW = "月火水木金"
 
 def fmt_cond(f, op, th):
     lab = LABEL.get(f, f)
-    if f in ("ma_up", "new_hi"):
+    if f in ("ma_up", "new_hi", "gc5"):
         return lab
     if f == "up_streak":
         return f"{lab} {op} {th:g}日"
