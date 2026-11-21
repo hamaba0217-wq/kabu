@@ -257,6 +257,11 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             q.loc[(q["date"] - q["d_pe"]).dt.days > 100, "prog_ex"] = np.nan
             so = g0[g0["shares_outstanding"] > 0][["code", "disclosed_date", "shares_outstanding"]] \
                 .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date")
+            # 仮説(2026-11-22 35回目)：発行済株式数の前回の決算からの変化（自己株式の消却＝減少、増資・転換＝増加）。分割(±50%超)は除外
+            so = so.sort_values(["code", "disclosed_date"])
+            so["sh_chg"] = so.groupby("code")["shares_outstanding"].pct_change()
+            so.loc[so["sh_chg"].abs() > 0.5, "sh_chg"] = np.nan
+            so = so.sort_values("disclosed_date")
             q = pd.merge_asof(q.sort_values("date"), so.rename(columns={"disclosed_date": "d_so"}),
                               left_on="date", right_on="d_so", by="code", direction="backward")
             q["mcap"] = q["close"] * q["shares_outstanding"]
@@ -595,6 +600,16 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["sec_mcap_rank"] = q.groupby(["date", "sector"])["mcap"].rank(pct=True)
     else:
         q["sec_mcap_rank"] = np.nan
+    # 仮説(2026-11-22 35回目)：個別の20日ボラ/業種の20日ボラ(中央値)＝業種の中で特に荒れているか・
+    # 業種の60日騰落の業種間の順位（0=最も下げた業種）＝長めの業種ローテーション。t 終値で確定
+    if "sector" in q.columns:
+        q["vol_rel_sec"] = q["vol20"] / q.groupby(["date", "sector"])["vol20"].transform("median").replace(0, np.nan)
+        s60 = q.groupby(["date", "sector"])["ret60"].median()
+        q["sec60_rank"] = s60.groupby(level=0).rank(pct=True).reindex(pd.MultiIndex.from_arrays([q["date"], q["sector"]])).values
+    else:
+        q["vol_rel_sec"] = q["sec60_rank"] = np.nan
+    if "sh_chg" not in q.columns:
+        q["sh_chg"] = np.nan
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -794,6 +809,10 @@ GRID = {
     "rel_sec1":  [("<=", -0.03), ("<=", -0.015), (">=", 0.02)],
     "lo_cnt20":  [(">=", 8), (">=", 4), ("<=", 1)],
     "sec_mcap_rank": [(">=", 0.8), (">=", 0.5), ("<=", 0.3)],
+    # 仮説(2026-11-22 35回目)：発行済株式数の変化・業種内でのボラの相対・業種の60日騰落の業種間順位
+    "sh_chg":    [("<=", -0.01), (">=", 0.005), (">=", 0.02)],
+    "vol_rel_sec": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
+    "sec60_rank": [("<=", 0.15), ("<=", 0.3), (">=", 0.85)],
 }
 
 LABEL = {
@@ -860,6 +879,8 @@ LABEL = {
     "mkt_above25": "市場全体で25日線より上の銘柄の割合",
     "rel_sec1": "当日の騰落−業種の当日の騰落(中央値)", "lo_cnt20": "直近20日で60日安値(終値)を更新した日数",
     "sec_mcap_rank": "業種内の時価総額の順位(1=最大)",
+    "sh_chg": "発行済株式数の前回決算からの変化", "vol_rel_sec": "20日ボラ/業種の20日ボラ(中央値)",
+    "sec60_rank": "業種の60日騰落の業種間の順位(0=最も下げた)",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
