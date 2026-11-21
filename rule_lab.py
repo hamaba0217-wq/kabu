@@ -168,6 +168,9 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["wti_ret5"] = m["wti"].pct_change(5)                             # 仮説(20回目2周目)：原油の短期の急変
         x["sp500_ret5"] = m["sp500"].pct_change(5)                         # 日本株の相対の弱さの計算用（GRIDには入れない）
         x["vix_chg1"] = m["vix"].diff()                                    # 仮説(20回目)：VIXの1日変化（急騰後の反落＝不安のピークアウト）
+        # 仮説(22回目2周目)：米10年金利の短期の急変・VIXの20日最大に対する比（市場全体の不安のピークアウト）
+        x["us10y_chg5"] = m["us10y"] - m["us10y"].shift(5)
+        x["vix_pk20"] = m["vix"] / m["vix"].rolling(20, min_periods=15).max()
         x["spread_chg20"] = (m["us10y"] - m["jgb10y"]) - (m["us10y"] - m["jgb10y"]).shift(20)   # 仮説(19回目)：日米10年金利差の20日変化
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
@@ -597,6 +600,10 @@ GRID = {
     "sec_crash_pk":   [("<=", 0.5), ("<=", 0.8), (">=", 1)],
     "sec_big5":  [(">=", 0.03), ("<=", -0.03), ("<=", -0.06)],
     "big_gap5":  [(">=", 0.08), (">=", 0.04), ("<=", -0.03)],
+    # 仮説(2026-11-21 22回目2周目)：米金利の短期の急変・VIXのピークアウト・前日の為替の急変
+    "us10y_chg5": [(">=", 0.15), ("<=", -0.15)],
+    "vix_pk20":  [(">=", 0.95), ("<=", 0.8), ("<=", 0.65)],
+    "usdjpy_ret1": [(">=", 0.007), ("<=", -0.007)],
 }
 
 LABEL = {
@@ -638,8 +645,9 @@ LABEL = {
     "ret250": "250日騰落(長期の勢い)", "min1_20": "直近20日の最大の日次下落率", "ud_vol20": "上昇日/下落日の出来高比(20日)",
     "sec_crash_chg5": "同業種の急落割合の5日変化", "sec_crash_pk": "同業種の急落割合の20日最大に対する比",
     "sec_big5": "業種の大型株(時価総額上位3)の5日騰落", "big_gap5": "業種の大型株の5日騰落-その銘柄の5日騰落",
+    "us10y_chg5": "米10年金利の5日変化(%pt・前日)", "vix_pk20": "VIXの20日最大に対する比(前日)", "usdjpy_ret1": "ドル円の1日変化(前日)",
 }
-POINT_FEATS = {"vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
+POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
 
 
@@ -673,7 +681,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
