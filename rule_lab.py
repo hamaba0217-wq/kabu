@@ -213,6 +213,15 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["clpos"] = (c - l) / rng
     q["gap"] = o / prev - 1
     q["body"] = (c - o) / o
+    # 仮説(2026-11-21)：連続陽線・出来高の枯れ・52週高値更新（すべて t 終値時点で確定）
+    bull = (c > o).astype(int)
+    grp = (bull == 0).groupby(q["code"]).cumsum()
+    q["up_streak"] = bull.groupby([q["code"], grp]).cumsum().astype(float)
+    v5 = v.groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=5).mean())
+    v60 = v.groupby(q["code"]).transform(lambda s: s.shift(5).rolling(60, min_periods=40).mean())
+    q["vdry"] = v5 / v60.replace(0, np.nan)
+    phi = g["high"].transform(lambda s: s.shift(1).rolling(250, min_periods=120).max())
+    q["new_hi"] = (c > phi).astype(float).where(phi.notna())
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -281,6 +290,10 @@ GRID = {
     "month":     [("==", m) for m in range(1, 13)],
     "dow":       [("==", d) for d in range(5)],
     "since_disc": [("<=", 3), ("<=", 10), (">=", 60)],
+    # 仮説(2026-11-21)
+    "up_streak": [(">=", 3), (">=", 5)],
+    "vdry":      [("<=", 0.5), ("<=", 0.7), (">=", 1.5)],
+    "new_hi":    [(">=", 1)],
 }
 
 LABEL = {
@@ -298,6 +311,7 @@ LABEL = {
     "jgb_slope": "日本国債 10年-2年金利差(%pt)", "usdjpy_ret20": "ドル円の20日変化",
     "wti_ret20": "原油(WTI)の20日騰落", "sp500_ret1": "前夜のS&P500", "sp500_ret20": "S&P500の20日騰落",
     "nasdaq_ret5": "NASDAQの5日騰落", "month": "月", "dow": "曜日", "since_disc": "直近の決算発表からの日数",
+    "up_streak": "連続陽線の日数", "vdry": "出来高の枯れ(5日平均/前60日平均)", "new_hi": "52週高値を終値で更新",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -305,8 +319,10 @@ DOW = "月火水木金"
 
 def fmt_cond(f, op, th):
     lab = LABEL.get(f, f)
-    if f == "ma_up":
+    if f in ("ma_up", "new_hi"):
         return lab
+    if f == "up_streak":
+        return f"{lab} {op} {th:g}日"
     if f == "tv20":
         return f"{lab} {op} {th/1e8:g}億円"
     if f in ("close",):
@@ -321,7 +337,7 @@ def fmt_cond(f, op, th):
         return f"{lab} {op} {th*100:g}%"
     if f in POINT_FEATS:
         return f"{lab} {op} {th:g}"
-    if f in ("vratio", "rsi14", "clpos"):
+    if f in ("vratio", "rsi14", "clpos", "vdry"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
