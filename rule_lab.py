@@ -251,6 +251,14 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             q["op_yield"] = (q["fc_op_now"] / q["mcap"].replace(0, np.nan)).where(~old)
             q["fc_margin"] = (q["fc_op_now"] / q["fc_ns"].where(q["fc_ns"] > 0)).where(~old)
             q = q.drop(columns=["d_fz", "fc_op_now", "fc_ns"])
+            # 仮説(2026-11-21 15回目)：今期見通しの伸び＝直近の会社予想営業利益/直近の本決算(FY)の営業利益実績 − 1
+            fya = g0[(g0["period_type"] == "FY") & (g0["operating_profit"] > 0)][["code", "disclosed_date", "operating_profit"]]                 .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date")                 .rename(columns={"disclosed_date": "d_fya", "operating_profit": "fy_op"})
+            fcz = g0.dropna(subset=["fc_operating_profit"])[["code", "disclosed_date", "fc_operating_profit"]]                 .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date")                 .rename(columns={"disclosed_date": "d_fcz", "fc_operating_profit": "fc_op_g"})
+            q = pd.merge_asof(q.sort_values("date"), fya, left_on="date", right_on="d_fya", by="code", direction="backward")
+            q = pd.merge_asof(q.sort_values("date"), fcz, left_on="date", right_on="d_fcz", by="code", direction="backward")
+            okg = ((q["date"] - q["d_fya"]).dt.days <= 300) & ((q["date"] - q["d_fcz"]).dt.days <= 200) & (q["d_fcz"] >= q["d_fya"] - pd.Timedelta(days=45))
+            q["fc_growth"] = (q["fc_op_g"] / q["fy_op"] - 1).where(okg)
+            q = q.drop(columns=["d_fya", "fy_op", "d_fcz", "fc_op_g"])
             # 仮説(2026-11-21 13回目)：売上の進捗率の上振れ＝累計売上/会社予想の売上 − 標準進捗（利益より振れが小さい）
             gs = cache.load("fin")
             if {"net_sales", "fc_net_sales"} <= set(gs.columns):
@@ -355,6 +363,14 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     sd5 = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(5, min_periods=5).std())
     sd60 = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.shift(5).rolling(60, min_periods=40).std())
     q["vol_exp"] = sd5 / sd60.replace(0, np.nan)
+    # 仮説(2026-11-21 15回目)：夜間(前日終値→当日始値)と日中(始値→終値)の20日累計騰落の分解（t 終値時点で確定）
+    lg_on = np.log(o / prev)
+    lg_in = np.log(c / o)
+    q["ovn20"] = np.expm1(lg_on.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=20).sum()))
+    q["intra20"] = np.expm1(lg_in.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=20).sum()))
+    # 仮説(2026-11-21 15回目)：市場全体の荒れ具合＝その日の全銘柄の騰落のばらつき（標準偏差）の5日平均
+    xd = q.groupby("date")["ret1"].std().sort_index().rolling(5, min_periods=5).mean().rename("xs_disp5")
+    q = q.merge(xd, on="date", how="left")
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -464,6 +480,11 @@ GRID = {
     "disc_ret":  [("<=", -0.10), ("<=", -0.05), (">=", 0.05)],
     "us_dd60":   [("<=", -0.03), ("<=", -0.06)],
     "turn20":    [(">=", 0.01), (">=", 0.02), ("<=", 0.002)],
+    # 仮説(2026-11-21 15回目)：夜間・日中の騰落の分解、市場全体の荒れ具合、来期見通しの伸び
+    "ovn20":     [("<=", -0.10), ("<=", -0.08), ("<=", -0.04), (">=", 0.05)],
+    "intra20":   [("<=", -0.15), ("<=", -0.08), (">=", 0.10)],
+    "xs_disp5":  [(">=", 0.03), ("<=", 0.018)],
+    "fc_growth": [(">=", 0.20), (">=", 0.10), ("<=", -0.10)],
 }
 
 LABEL = {
@@ -491,6 +512,8 @@ LABEL = {
     "op_yield": "予想営業利益の利回り(会社予想/時価総額)", "fc_margin": "予想営業利益率(会社予想)", "dn_streak": "終値の連続下落日数",
     "sales_prog": "売上の進捗率-標準進捗(会社予想比)", "vol_exp": "ボラの急拡大(5日/前60日)", "mkt5": "市場全体の5日騰落(中央値)",
     "disc_ret": "決算発表後の株価反応(発表前日比・20日以内)", "us_dd60": "S&P500の60日高値からの下落(前日)", "turn20": "売買の回転率(20日平均売買代金/時価総額)",
+    "ovn20": "夜間(前日終値→始値)の20日累計騰落", "intra20": "日中(始値→終値)の20日累計騰落",
+    "xs_disp5": "市場全体の騰落のばらつき(5日平均)", "fc_growth": "今期見通しの伸び(会社予想営業利益/前期実績)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
