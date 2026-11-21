@@ -1,0 +1,46 @@
+name: Rule Lab (勝率改善ルール探索)
+on:
+  schedule:
+    - cron: '17 * * * *'   # 毎時（夜間も含め24時間）
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: rule-lab
+  cancel-in-progress: false
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # 株価キャッシュ（data/）を実行間で引き継ぐ
+      - uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: rule-lab-data-${{ github.run_id }}
+          restore-keys: rule-lab-data-
+      - name: データ取得（初回のみ全期間・以降は差分）
+        run: python -u fetch_data.py 1100
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data
+          key: rule-lab-data-${{ github.run_id }}
+      - name: ルール探索
+        run: |
+          git config user.name "rule-lab-bot"
+          git config user.email "rule-lab-bot@users.noreply.github.com"
+          python -u rule_lab.py --no-fetch --push
+        env:
+          RULE_LAB_BATCH: '1000'

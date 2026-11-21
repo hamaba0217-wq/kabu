@@ -283,6 +283,7 @@ def _nav(active):
             f'<a href="ipo.html"{cls("ipo")}>🚀 IPO注目</a>'
             f'<a href="recent.html"{cls("recent")}>🗓 過去10日の推奨</a>'
             f'<a href="results.html"{cls("results")}>📈 推奨のその後（実績）</a>'
+            f'<a href="rules.html"{cls("rules")}>🎯 勝率改善ルール</a>'
             f'</div>')
 
 
