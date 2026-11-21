@@ -586,6 +586,15 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     ab25 = (q["dev25"] > 0).astype(float).where(q["dev25"].notna())
     q["mkt_above25"] = ab25.groupby(q["date"]).transform("mean")
     q["sec_above25"] = ab25.groupby([q["date"], q["sector"]]).transform("mean") if "sector" in q.columns else np.nan
+    # 仮説(2026-11-22 34回目)：当日の騰落の業種差・直近20日で60日安値を更新した日数・業種内の時価総額の順位。t 終値で確定
+    q["rel_sec1"] = q["ret1"] - q["sec_ret1"] if "sec_ret1" in q.columns else np.nan
+    lo60c = q.groupby("code", sort=False)["close"].transform(lambda s: s.rolling(60, min_periods=40).min())
+    nlo = (q["close"] <= lo60c).astype(float).where(lo60c.notna())
+    q["lo_cnt20"] = nlo.groupby(q["code"], sort=False).transform(lambda s: s.rolling(20, min_periods=20).sum())
+    if "mcap" in q.columns and "sector" in q.columns:
+        q["sec_mcap_rank"] = q.groupby(["date", "sector"])["mcap"].rank(pct=True)
+    else:
+        q["sec_mcap_rank"] = np.nan
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -781,6 +790,10 @@ GRID = {
     "us_corr60": [(">=", 0.3), (">=", 0.15), ("<=", 0.0)],
     "sec_above25": [("<=", 0.1), ("<=", 0.25), (">=", 0.6)],
     "mkt_above25": [("<=", 0.2), ("<=", 0.35), (">=", 0.6)],
+    # 仮説(2026-11-22 34回目)：当日の騰落の業種差・60日安値の更新回数・業種内の時価総額の順位
+    "rel_sec1":  [("<=", -0.03), ("<=", -0.015), (">=", 0.02)],
+    "lo_cnt20":  [(">=", 8), (">=", 4), ("<=", 1)],
+    "sec_mcap_rank": [(">=", 0.8), (">=", 0.5), ("<=", 0.3)],
 }
 
 LABEL = {
@@ -845,6 +858,8 @@ LABEL = {
     "rng5_20": "直近5日の値幅/直近20日の値幅", "dev5": "5日線乖離",
     "us_corr60": "前夜の米国株(S&P500)との60日相関", "sec_above25": "業種内で25日線より上の銘柄の割合",
     "mkt_above25": "市場全体で25日線より上の銘柄の割合",
+    "rel_sec1": "当日の騰落−業種の当日の騰落(中央値)", "lo_cnt20": "直近20日で60日安値(終値)を更新した日数",
+    "sec_mcap_rank": "業種内の時価総額の順位(1=最大)",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -880,7 +895,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
