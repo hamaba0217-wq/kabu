@@ -51,30 +51,42 @@ BATCH = int(os.environ.get("RULE_LAB_BATCH", "400"))
 # データ
 # --------------------------------------------------------------------------
 
+def _adjust(q: pd.DataFrame) -> pd.DataFrame:
+    """全期間を通して分割・併合を調整（後の調整係数の累積積を過去の価格に掛ける）"""
+    if "adj_factor" not in q.columns or q["adj_factor"].isna().all():
+        return q
+    f = q["adj_factor"].fillna(1.0).replace(0, 1.0)
+    # 各行より「後」の係数の積
+    logf = np.log(f)
+    rev = logf[::-1].groupby(q["code"][::-1]).cumsum()[::-1]
+    cum = np.exp(rev - logf)
+    for col in ("open", "high", "low", "close"):
+        q[col] = q[col] * cum
+    q["volume"] = q["volume"] / cum
+    return q
+
+
 def load_data(fetch: bool) -> pd.DataFrame:
     import cache
-    if fetch and cache.load("quotes") is None:
-        raise SystemExit("data/quotes.pkl がまだありません（初回取得中の可能性）。今回はスキップ")
     if fetch:
-        try:
-            from sources import JQuants
-            JQuants().quotes(1100)
-        except Exception as e:
-            print(f"[警告] 差分取得に失敗（キャッシュで続行）: {e}")
-    q = cache.load("quotes")
-    if q is None:
-        raise SystemExit("data/quotes.pkl がありません。python fetch_data.py を先に実行してください")
-    cols = [c for c in ["code", "date", "open", "high", "low", "close", "volume", "turnover_value"]
+        subprocess.run([sys.executable, "-u", "fetch_data.py"])
+    status = open(os.path.join("data", "fetch_status.txt")).read().strip()         if os.path.exists(os.path.join("data", "fetch_status.txt")) else "none"
+    q = cache.load("raw_quotes")
+    if q is None or status != "ready":
+        print(f"RESULT skipped=データ取得途中（{status}）。次回の実行で続きを取得します")
+        raise SystemExit(0)
+    cols = [c for c in ["code", "date", "open", "high", "low", "close", "volume", "turnover_value", "adj_factor"]
             if c in q.columns]
     q = q[cols].copy()
     q["date"] = pd.to_datetime(q["date"])
     q = q.dropna(subset=["open", "high", "low", "close"])
     q = q[(q["close"] > 0) & (q["open"] > 0)]
     q = q.sort_values(["code", "date"]).reset_index(drop=True)
+    q = _adjust(q)
     # 業種
     lst = cache.load("listed")
     if lst is not None:
-        sc = next((c for c in ["sector17", "Sector17CodeName", "S17Nm", "sector"] if c in lst.columns), None)
+        sc = next((c for c in ["sector33", "sector17", "Sector17CodeName", "S17Nm", "sector"] if c in lst.columns), None)
         cc = next((c for c in ["code", "Code"] if c in lst.columns), None)
         if sc and cc:
             m = lst[[cc, sc]].drop_duplicates(cc)

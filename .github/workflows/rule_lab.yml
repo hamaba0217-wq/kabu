@@ -11,7 +11,7 @@ concurrency:
 jobs:
   search:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v5
         with:
@@ -29,9 +29,10 @@ jobs:
           key: rule-lab-data-${{ github.run_id }}
           restore-keys: rule-lab-data-
       - name: データ取得（初回のみ全期間・以降は差分）
-        run: python -u fetch_data.py 1100
+        run: python -u fetch_data.py
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          FETCH_MINUTES: '60'
       - uses: actions/cache/save@v4
         if: always()
         with:
