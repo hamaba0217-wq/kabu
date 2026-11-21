@@ -465,6 +465,13 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["ud_vol20"] = vu / vd.replace(0, np.nan)
     plo = g["low"].transform(lambda s: s.shift(1).rolling(250, min_periods=120).min())
     q["new_lo"] = (c < plo).astype(float).where(plo.notna())
+    # 仮説(2026-11-22 24回目)：安値からの戻り始め（終値/直近5日安値）・下げの集中度（5日騰落/20日騰落）・
+    # 出来高のクライマックス（当日の出来高/前60日の最大）。すべて t 終値時点で確定
+    l5 = g["low"].transform(lambda s: s.rolling(5, min_periods=5).min())
+    q["bounce5"] = c / l5 - 1
+    q["crash_speed"] = (q["ret5"] / q["ret20"]).where(q["ret20"] <= -0.05)
+    vmx = v.groupby(q["code"]).transform(lambda s: s.shift(1).rolling(60, min_periods=40).max())
+    q["vol_climax"] = v / vmx.replace(0, np.nan)
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -625,6 +632,10 @@ GRID = {
     # 仮説(2026-11-21 22回目3周目)：売上高の前年同期比
     "sales_yoy": [(">=", 0.15), (">=", 0.05), ("<=", -0.05)],
     "sec_wide":  [(">=", 0.5), (">=", 0.25), ("<=", 0.1)],
+    # 仮説(2026-11-22 24回目)：安値からの戻り始め・下げの集中度・出来高のクライマックス
+    "bounce5":   [(">=", 0.05), (">=", 0.02), ("<=", 0.005)],
+    "crash_speed": [(">=", 0.7), ("<=", 0.3), ("<=", 0.0)],
+    "vol_climax": [(">=", 1.0), (">=", 0.7), ("<=", 0.2)],
 }
 
 LABEL = {
@@ -668,6 +679,8 @@ LABEL = {
     "sec_big5": "業種の大型株(時価総額上位3)の5日騰落", "big_gap5": "業種の大型株の5日騰落-その銘柄の5日騰落",
     "us10y_chg5": "米10年金利の5日変化(%pt・前日)", "vix_pk20": "VIXの20日最大に対する比(前日)", "usdjpy_ret1": "ドル円の1日変化(前日)",
     "sales_yoy": "売上高の前年同期比(直近の決算)", "sec_wide": "急落が広がった業種の割合(市場全体)",
+    "bounce5": "直近5日の安値からの戻り", "crash_speed": "下げの集中度(5日騰落/20日騰落)",
+    "vol_climax": "出来高のクライマックス(当日/前60日の最大)",
 }
 POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
