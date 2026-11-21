@@ -342,6 +342,8 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     sc = pd.DataFrame({"sec_crash_chg5": scs - scg.shift(5),
                        "sec_crash_pk": scs / scmax.replace(0, np.nan)}).reset_index()
     q = q.merge(sc, on=["sector", "date"], how="left")
+    # 仮説(2026-11-21 22回目4周目)：急落が広がった業種の割合（同業種の急落割合≥15%の業種数/全業種数）＝相場全体の売られ方の広さ
+    q["sec_wide"] = (scs >= 0.15).astype(float).where(scs.notna()).groupby(level=1).mean().reindex(q["date"]).values
     # 仮説(2026-11-21 22回目)：業種の大型株（時価総額上位3銘柄）の5日騰落の平均＝業種の主力株が先に戻り始めたか
     if "mcap" in q.columns:
         rk = q.groupby(["date", "sector"])["mcap"].rank(ascending=False, method="first")
@@ -622,6 +624,7 @@ GRID = {
     "usdjpy_ret1": [(">=", 0.007), ("<=", -0.007)],
     # 仮説(2026-11-21 22回目3周目)：売上高の前年同期比
     "sales_yoy": [(">=", 0.15), (">=", 0.05), ("<=", -0.05)],
+    "sec_wide":  [(">=", 0.5), (">=", 0.25), ("<=", 0.1)],
 }
 
 LABEL = {
@@ -664,7 +667,7 @@ LABEL = {
     "sec_crash_chg5": "同業種の急落割合の5日変化", "sec_crash_pk": "同業種の急落割合の20日最大に対する比",
     "sec_big5": "業種の大型株(時価総額上位3)の5日騰落", "big_gap5": "業種の大型株の5日騰落-その銘柄の5日騰落",
     "us10y_chg5": "米10年金利の5日変化(%pt・前日)", "vix_pk20": "VIXの20日最大に対する比(前日)", "usdjpy_ret1": "ドル円の1日変化(前日)",
-    "sales_yoy": "売上高の前年同期比(直近の決算)",
+    "sales_yoy": "売上高の前年同期比(直近の決算)", "sec_wide": "急落が広がった業種の割合(市場全体)",
 }
 POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -700,7 +703,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
