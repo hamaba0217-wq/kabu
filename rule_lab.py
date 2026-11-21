@@ -495,6 +495,14 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q = add_context(q)
     # 仮説(2026-11-21 20回目4周目)：日本株だけが売られた度合い＝市場全体の5日騰落(中央値) − 米国株(S&P500)の5日騰落(前日)
     q["jp_rel5"] = q["mkt5"] - q["sp500_ret5"] if "sp500_ret5" in q.columns else np.nan
+    # 仮説(2026-11-22 26回目2周目)：市場全体の連続下落日数（全銘柄の前日比の中央値がマイナスの日の連続）・
+    # 60日安値をつけた銘柄の割合（市場全体の投げ売り）・業種の5日騰落−市場全体の5日騰落（業種のローテーション）。t 終値時点で確定
+    md1 = q.groupby("date")["ret1"].median().sort_index()
+    dn_m = (md1 < 0).astype(int)
+    q = q.merge(dn_m.groupby((dn_m == 0).cumsum()).cumsum().astype(float).rename("mkt_dn_streak"), on="date", how="left")
+    atlo = (q["low"] <= q["lo60"]).astype(float).where(q["lo60"].notna())
+    q = q.merge(atlo.groupby(q["date"]).mean().rename("mkt_lo60_frac"), on="date", how="left")
+    q["sec_rel5"] = q["sec5"] - q["mkt5"] if "sec5" in q.columns else np.nan
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -658,6 +666,10 @@ GRID = {
     "z_drop20":  [("<=", -2.5), ("<=", -1.5), (">=", 0.0)],
     "gap_rec":   [(">=", 1.0), (">=", 0.5), ("<=", 0.0)],
     "lo_days60": [("<=", 0), ("<=", 3), (">=", 20)],
+    # 仮説(2026-11-22 26回目2周目)：市場全体の連続下落日数・60日安値をつけた銘柄の割合・業種の市場に対する5日騰落の差
+    "mkt_dn_streak": [(">=", 4), (">=", 2), ("<=", 0)],
+    "mkt_lo60_frac": [(">=", 0.2), (">=", 0.1), ("<=", 0.03)],
+    "sec_rel5":  [("<=", -0.05), ("<=", -0.02), (">=", 0.03)],
 }
 
 LABEL = {
@@ -707,6 +719,8 @@ LABEL = {
     "xs_skew5": "市場全体の5日騰落の歪度(全銘柄)",
     "z_drop20": "ボラで割った20日騰落(20日騰落/(60日ボラ×√20))", "gap_rec": "窓を開けて下げた日の日中の戻り(窓≤-2%)",
     "lo_days60": "60日安値からの経過日数",
+    "mkt_dn_streak": "市場全体の連続下落日数(前日比の中央値)", "mkt_lo60_frac": "60日安値をつけた銘柄の割合(市場全体)",
+    "sec_rel5": "業種の5日騰落-市場全体の5日騰落",
 }
 POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -728,7 +742,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
