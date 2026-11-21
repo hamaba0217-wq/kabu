@@ -610,7 +610,17 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["vol_rel_sec"] = q["sec60_rank"] = np.nan
     if "sh_chg" not in q.columns:
         q["sh_chg"] = np.nan
-    cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
+    # 仮説(2026-11-22 37回目)：業種内のPBRの順位（業種の中で割安か）・市場全体で25日線より上の割合の5日変化（地合いの改善の始まり）・
+    # 直近20日で窓≤-2%を開けて下げた日数（夜間のショックの繰り返し）。t 終値で確定
+    if "pbr" in q.columns and "sector" in q.columns:
+        q["sec_pbr_rank"] = q["pbr"].where(q["pbr"] > 0).groupby([q["date"], q["sector"]]).rank(pct=True)
+    else:
+        q["sec_pbr_rank"] = np.nan
+    ma25d = q.groupby("date")["mkt_above25"].first().sort_index()
+    q = q.merge((ma25d - ma25d.shift(5)).rename("mkt_ab25_chg5"), on="date", how="left")
+    gdn = (q["gap"] <= -0.02).astype(float).where(q["gap"].notna())
+    q["gap_dn_cnt20"] = gdn.groupby(q["code"], sort=False).transform(lambda s: s.rolling(20, min_periods=20).sum())
+    cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
     g = q.groupby("code", sort=False)
@@ -813,6 +823,10 @@ GRID = {
     "sh_chg":    [("<=", -0.01), (">=", 0.005), (">=", 0.02)],
     "vol_rel_sec": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
     "sec60_rank": [("<=", 0.15), ("<=", 0.3), (">=", 0.85)],
+    # 仮説(2026-11-22 37回目)：業種内のPBRの順位・市場全体の25日線より上の割合の5日変化・窓を開けて下げた日数
+    "sec_pbr_rank": [("<=", 0.2), ("<=", 0.4), (">=", 0.8)],
+    "mkt_ab25_chg5": [(">=", 0.15), (">=", 0.05), ("<=", -0.15)],
+    "gap_dn_cnt20": [(">=", 4), (">=", 2), ("<=", 0)],
 }
 
 LABEL = {
@@ -881,6 +895,8 @@ LABEL = {
     "sec_mcap_rank": "業種内の時価総額の順位(1=最大)",
     "sh_chg": "発行済株式数の前回決算からの変化", "vol_rel_sec": "20日ボラ/業種の20日ボラ(中央値)",
     "sec60_rank": "業種の60日騰落の業種間の順位(0=最も下げた)",
+    "sec_pbr_rank": "業種内のPBRの順位(0=最も割安)", "mkt_ab25_chg5": "市場全体で25日線より上の割合の5日変化",
+    "gap_dn_cnt20": "直近20日で窓≤-2%を開けて下げた日数",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -902,7 +918,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
