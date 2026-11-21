@@ -154,6 +154,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["sp500_ret1"] = m["sp500"].pct_change(1)
         x["sp500_ret20"] = m["sp500"].pct_change(20)
         x["nasdaq_ret5"] = m["nasdaq"].pct_change(5)
+        x["us_dd60"] = m["sp500"] / m["sp500"].rolling(60, min_periods=40).max() - 1   # 仮説(14回目)：米国株の60日高値からの下落
         x["usdjpy_ret1"] = m["usdjpy"].pct_change(1)                    # 為替感応度の計算用（GRIDには入れない）
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
@@ -185,6 +186,13 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             q = pd.merge_asof(q, f.rename(columns={"disclosed_date": "last_disc"}),
                               left_on="date", right_on="last_disc", by="code", direction="backward")
             q["since_disc"] = (q["date"] - q["last_disc"]).dt.days
+            # 仮説(2026-11-21 14回目)：決算発表後の株価反応＝発表日前日の終値から t 終値までの騰落（発表から20日以内のみ）
+            q = q.sort_values(["code", "date"]).reset_index(drop=True)
+            pc = q.groupby("code", sort=False)["close"].shift(1)
+            q["_pc_disc"] = pc.where(q["date"] == q["last_disc"])
+            q["_pc_disc"] = q.groupby(["code", "last_disc"])["_pc_disc"].transform("first")
+            q["disc_ret"] = (q["close"] / q["_pc_disc"] - 1).where(q["since_disc"] <= 20)
+            q = q.drop(columns=["_pc_disc"])
             q = q.drop(columns=["last_disc"])
     except Exception as e:
         print(f"[警告] 決算日データなし: {e}")
@@ -232,6 +240,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             q = pd.merge_asof(q.sort_values("date"), so.rename(columns={"disclosed_date": "d_so"}),
                               left_on="date", right_on="d_so", by="code", direction="backward")
             q["mcap"] = q["close"] * q["shares_outstanding"]
+            q["turn20"] = q["tv20"] / q["mcap"].replace(0, np.nan)   # 仮説(14回目)：売買の回転率（20日平均売買代金/時価総額）
             q = q.drop(columns=["d_pe", "d_so", "shares_outstanding"])
             # 仮説(2026-11-21 12回目)：予想営業利益の利回り（会社予想の営業利益/時価総額）・予想営業利益率（営業利益/売上）
             fz = g0[["code", "disclosed_date", "fc_operating_profit"]].copy()
@@ -452,6 +461,9 @@ GRID = {
     "sales_prog": [(">=", 0.05), (">=", -0.02), ("<=", -0.05)],
     "vol_exp":   [(">=", 2.0), ("<=", 0.6)],
     "mkt5":      [("<=", -0.02), (">=", 0.02)],
+    "disc_ret":  [("<=", -0.10), ("<=", -0.05), (">=", 0.05)],
+    "us_dd60":   [("<=", -0.03), ("<=", -0.06)],
+    "turn20":    [(">=", 0.01), (">=", 0.02), ("<=", 0.002)],
 }
 
 LABEL = {
@@ -478,6 +490,7 @@ LABEL = {
     "down_frac20": "直近20日の下落日の割合", "sec_disp20": "業種内の20日騰落のばらつき", "sec_turn": "業種の20日騰落の変化(20日前比)",
     "op_yield": "予想営業利益の利回り(会社予想/時価総額)", "fc_margin": "予想営業利益率(会社予想)", "dn_streak": "終値の連続下落日数",
     "sales_prog": "売上の進捗率-標準進捗(会社予想比)", "vol_exp": "ボラの急拡大(5日/前60日)", "mkt5": "市場全体の5日騰落(中央値)",
+    "disc_ret": "決算発表後の株価反応(発表前日比・20日以内)", "us_dd60": "S&P500の60日高値からの下落(前日)", "turn20": "売買の回転率(20日平均売買代金/時価総額)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
