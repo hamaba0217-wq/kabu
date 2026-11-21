@@ -282,6 +282,19 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
                                   left_on="date", right_on="d_sp", by="code", direction="backward")
                 q.loc[(q["date"] - q["d_sp"]).dt.days > 100, "sales_prog"] = np.nan
                 q = q.drop(columns=["d_sp"])
+            # 仮説(2026-11-21 19回目2周目)：営業利益の前年同期比（同じ四半期区分の約1年前の開示と比較、発表日当日までの値のみ）
+            gy = g0[["code", "disclosed_date", "period_type", "operating_profit"]].dropna(subset=["operating_profit"])                 .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date").copy()
+            gy["d_prev"] = gy["disclosed_date"] - pd.Timedelta(days=365)
+            py_ = gy[["code", "period_type", "disclosed_date", "operating_profit"]].rename(
+                columns={"disclosed_date": "d_py", "operating_profit": "op_py"}).sort_values("d_py")
+            gy = pd.merge_asof(gy.sort_values("d_prev"), py_, left_on="d_prev", right_on="d_py",
+                               by=["code", "period_type"], direction="nearest", tolerance=pd.Timedelta(days=60))
+            gy["op_yoy"] = np.where(gy["op_py"] > 0, gy["operating_profit"] / gy["op_py"] - 1, np.nan)
+            gy = gy.dropna(subset=["op_yoy"])[["code", "disclosed_date", "op_yoy"]].sort_values("disclosed_date")
+            q = pd.merge_asof(q.sort_values("date"), gy.rename(columns={"disclosed_date": "d_yoy"}),
+                              left_on="date", right_on="d_yoy", by="code", direction="backward")
+            q.loc[(q["date"] - q["d_yoy"]).dt.days > 100, "op_yoy"] = np.nan
+            q = q.drop(columns=["d_yoy"])
     except Exception as e:
         print(f"[警告] PBR・予想修正なし: {e}")
     # 仮説(2026-11-21 7回目)：業種ローテーション＝業種全体の20日騰落（中央値）
@@ -392,6 +405,10 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q = q.merge(xd, on="date", how="left")
     # 仮説(2026-11-21 18回目)：個別の窓＝その銘柄の当日の窓 − 全銘柄の窓の中央値（市場要因を除いた寄り付きの売られ方）
     q["xs_gap"] = q["gap"] - q.groupby("date")["gap"].transform("median")
+    # 仮説(2026-11-21 19回目2周目)：市場全体の窓（全銘柄の窓の中央値＝寄り付きの一斉の売り/買い）・52週安値を終値で割り込み
+    q["mkt_gap"] = q.groupby("date")["gap"].transform("median")
+    plo = g["low"].transform(lambda s: s.shift(1).rolling(250, min_periods=120).min())
+    q["new_lo"] = (c < plo).astype(float).where(plo.notna())
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -521,6 +538,9 @@ GRID = {
     "idio20":    [("<=", -0.25), ("<=", -0.15), (">=", 0.15)],
     "frac_crash": [(">=", 0.10), (">=", 0.05), ("<=", 0.01)],
     "spread_chg20": [(">=", 0.2), ("<=", -0.2)],
+    "mkt_gap":   [("<=", -0.015), ("<=", -0.008), (">=", 0.01)],
+    "new_lo":    [(">=", 1)],
+    "op_yoy":    [(">=", 0.30), (">=", 0.10), ("<=", -0.20)],
 }
 
 LABEL = {
@@ -553,6 +573,7 @@ LABEL = {
     "usdjpy_ret5": "ドル円の5日変化(前日)", "rev_up": "上向きの反転足(前日下落・終値が前日高値超え)", "hit_hist": "過去の+10%到達率(確定済みの直近60回)",
     "xs_gap": "個別の窓(当日の窓-全銘柄の窓の中央値)", "vix_rel60": "VIXの60日平均に対する倍率(前日)", "mkt_seg": "市場区分(1=プライム 2=スタンダード 3=グロース)",
     "idio20": "市場要因を除いた20日騰落(ベータ調整)", "frac_crash": "20日騰落-20%以下の銘柄の割合(市場全体)", "spread_chg20": "日米10年金利差の20日変化(%pt)",
+    "mkt_gap": "市場全体の窓(全銘柄の窓の中央値)", "new_lo": "52週安値を終値で割り込み", "op_yoy": "営業利益の前年同期比(直近の決算)",
 }
 POINT_FEATS = {"spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
