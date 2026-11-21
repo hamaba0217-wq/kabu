@@ -240,7 +240,8 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             # 仮説(2026-11-21 8回目)：会社予想に対する営業利益の進捗の上振れ・時価総額
             g0 = cache.load("fin")
             g0_ns = g0["fc_net_sales"].values if "fc_net_sales" in g0.columns else None
-            g0 = g0[["code", "disclosed_date", "period_type", "operating_profit", "fc_operating_profit", "shares_outstanding"]].copy()
+            g0 = g0[["code", "disclosed_date", "period_type", "operating_profit", "fc_operating_profit", "shares_outstanding"]
+                    + (["net_sales"] if "net_sales" in g0.columns else [])].copy()
             g0["code"] = g0["code"].astype(str)
             g0["disclosed_date"] = pd.to_datetime(g0["disclosed_date"])
             exp = g0["period_type"].map({"1Q": 0.25, "2Q": 0.5, "3Q": 0.75})
@@ -301,6 +302,21 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
                               left_on="date", right_on="d_yoy", by="code", direction="backward")
             q.loc[(q["date"] - q["d_yoy"]).dt.days > 100, "op_yoy"] = np.nan
             q = q.drop(columns=["d_yoy"])
+            # 仮説(2026-11-21 22回目3周目)：売上高の前年同期比（営業利益と同じ方法。発表日当日までの値のみ）
+            if "net_sales" not in g0.columns:
+                g0["net_sales"] = np.nan
+            gs2 = g0[["code", "disclosed_date", "period_type", "net_sales"]].dropna(subset=["net_sales"])                 .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date").copy()
+            gs2["d_prev"] = gs2["disclosed_date"] - pd.Timedelta(days=365)
+            ps_ = gs2[["code", "period_type", "disclosed_date", "net_sales"]].rename(
+                columns={"disclosed_date": "d_py", "net_sales": "ns_py"}).sort_values("d_py")
+            gs2 = pd.merge_asof(gs2.sort_values("d_prev"), ps_, left_on="d_prev", right_on="d_py",
+                                by=["code", "period_type"], direction="nearest", tolerance=pd.Timedelta(days=60))
+            gs2["sales_yoy"] = np.where(gs2["ns_py"] > 0, gs2["net_sales"] / gs2["ns_py"] - 1, np.nan)
+            gs2 = gs2.dropna(subset=["sales_yoy"])[["code", "disclosed_date", "sales_yoy"]].sort_values("disclosed_date")
+            q = pd.merge_asof(q.sort_values("date"), gs2.rename(columns={"disclosed_date": "d_syoy"}),
+                              left_on="date", right_on="d_syoy", by="code", direction="backward")
+            q.loc[(q["date"] - q["d_syoy"]).dt.days > 100, "sales_yoy"] = np.nan
+            q = q.drop(columns=["d_syoy"])
     except Exception as e:
         print(f"[警告] PBR・予想修正なし: {e}")
     # 仮説(2026-11-21 7回目)：業種ローテーション＝業種全体の20日騰落（中央値）
@@ -604,6 +620,8 @@ GRID = {
     "us10y_chg5": [(">=", 0.15), ("<=", -0.15)],
     "vix_pk20":  [(">=", 0.95), ("<=", 0.8), ("<=", 0.65)],
     "usdjpy_ret1": [(">=", 0.007), ("<=", -0.007)],
+    # 仮説(2026-11-21 22回目3周目)：売上高の前年同期比
+    "sales_yoy": [(">=", 0.15), (">=", 0.05), ("<=", -0.05)],
 }
 
 LABEL = {
@@ -646,6 +664,7 @@ LABEL = {
     "sec_crash_chg5": "同業種の急落割合の5日変化", "sec_crash_pk": "同業種の急落割合の20日最大に対する比",
     "sec_big5": "業種の大型株(時価総額上位3)の5日騰落", "big_gap5": "業種の大型株の5日騰落-その銘柄の5日騰落",
     "us10y_chg5": "米10年金利の5日変化(%pt・前日)", "vix_pk20": "VIXの20日最大に対する比(前日)", "usdjpy_ret1": "ドル円の1日変化(前日)",
+    "sales_yoy": "売上高の前年同期比(直近の決算)",
 }
 POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
