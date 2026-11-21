@@ -165,6 +165,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["usdjpy_ret5"] = m["usdjpy"].pct_change(5)                    # 仮説(17回目)：為替の短期の急変（円高・円安ショック）
         x["usdjpy_ret1"] = m["usdjpy"].pct_change(1)                    # 為替感応度の計算用（GRIDには入れない）
         x["vix_rel60"] = m["vix"] / m["vix"].rolling(60, min_periods=40).mean()   # 仮説(18回目)：VIXの60日平均に対する水準
+        x["spread_chg20"] = (m["us10y"] - m["jgb10y"]) - (m["us10y"] - m["jgb10y"]).shift(20)   # 仮説(19回目)：日米10年金利差の20日変化
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
         x = x[~x.index.duplicated(keep="last")]
@@ -311,6 +312,10 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         sx = (_roll(xa * xa) - _roll(xa) ** 2).clip(lower=0) ** 0.5
         sf = (_roll(fa * fa) - _roll(fa) ** 2).clip(lower=0) ** 0.5
         q["fx_corr60"] = cxy / (sx * sf).replace(0, np.nan)
+    # 仮説(2026-11-21 19回目)：市場要因を除いた20日騰落＝20日騰落 − 60日ベータ×市場全体の20日騰落（個別の悪材料による下げ）
+    q["idio20"] = q["ret20"] - q["beta60"].clip(-1, 3) * q["mkt20"]
+    # 仮説(2026-11-21 19回目)：市場全体の投げ売り度＝20日騰落が-20%以下の銘柄の割合（t 終値で確定）
+    q["frac_crash"] = (q["ret20"] <= -0.2).astype(float).where(q["ret20"].notna()).groupby(q["date"]).transform("mean")
     return q.sort_values(["code", "date"]).reset_index(drop=True)
 
 
@@ -512,6 +517,10 @@ GRID = {
     "xs_gap":    [("<=", -0.05), ("<=", -0.03), (">=", 0.03)],
     "vix_rel60": [(">=", 1.3), (">=", 1.15), ("<=", 0.85)],
     "mkt_seg":   [("==", 1), ("==", 2), ("==", 3), ("<=", 2)],
+    # 仮説(2026-11-21 19回目)：市場要因を除いた下げ・市場全体の投げ売り度・日米金利差
+    "idio20":    [("<=", -0.25), ("<=", -0.15), (">=", 0.15)],
+    "frac_crash": [(">=", 0.10), (">=", 0.05), ("<=", 0.01)],
+    "spread_chg20": [(">=", 0.2), ("<=", -0.2)],
 }
 
 LABEL = {
@@ -543,8 +552,9 @@ LABEL = {
     "xs_disp5": "市場全体の騰落のばらつき(5日平均)", "fc_growth": "今期見通しの伸び(会社予想営業利益/前期実績)",
     "usdjpy_ret5": "ドル円の5日変化(前日)", "rev_up": "上向きの反転足(前日下落・終値が前日高値超え)", "hit_hist": "過去の+10%到達率(確定済みの直近60回)",
     "xs_gap": "個別の窓(当日の窓-全銘柄の窓の中央値)", "vix_rel60": "VIXの60日平均に対する倍率(前日)", "mkt_seg": "市場区分(1=プライム 2=スタンダード 3=グロース)",
+    "idio20": "市場要因を除いた20日騰落(ベータ調整)", "frac_crash": "20日騰落-20%以下の銘柄の割合(市場全体)", "spread_chg20": "日米10年金利差の20日変化(%pt)",
 }
-POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
+POINT_FEATS = {"spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
 
 
