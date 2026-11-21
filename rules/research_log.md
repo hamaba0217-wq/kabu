@@ -1,5 +1,10 @@
 # 研究ログ（新しい順）
 
+## 2026-11-21 定期研究（5回目）
+- 結果はまだ無い。GitHub Actions を確認すると、Rule Lab は 08:06 開始の実行が進行中で、その前の 07:36 の実行は次の rule_lab.py の push で cancelled になっていた。rule_lab.py を毎時変更すると検証が取り消され続け、結果が出ない。
+- 方針：進行中の検証が完了し state.json・feature_report.md が出るまで rule_lab.py は変更しない（研究ログの push は Rule Lab を起動しないので可）。仮説の追加は結果を見てから。
+- 状態：1〜3回目の仮説は結果待ち。
+
 ## 2026-11-21 定期研究（4回目）
 - rules/state.json・feature_report.md・RULES.md は origin/main にまだ無い（データ取得中）。解釈できる数値が無いため、仮説は追加せず過去3回分は結果待ちのまま。結果が出てから評価する。
 
