@@ -208,10 +208,31 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
                               left_on="date", right_on="d_fc", by="code", direction="backward")
             q.loc[(q["date"] - q["d_fc"]).dt.days > 100, "fc_rev"] = np.nan   # 古い修正は使わない
             q = q.drop(columns=["d_bps", "bps", "d_fc"])
+            # 仮説(2026-11-21 8回目)：会社予想に対する営業利益の進捗の上振れ・時価総額
+            g0 = cache.load("fin")
+            g0 = g0[["code", "disclosed_date", "period_type", "operating_profit", "fc_operating_profit", "shares_outstanding"]].copy()
+            g0["code"] = g0["code"].astype(str)
+            g0["disclosed_date"] = pd.to_datetime(g0["disclosed_date"])
+            exp = g0["period_type"].map({"1Q": 0.25, "2Q": 0.5, "3Q": 0.75})
+            g0["prog_ex"] = np.where(g0["fc_operating_profit"] > 0,
+                                     g0["operating_profit"] / g0["fc_operating_profit"] - exp, np.nan)
+            pe = g0.dropna(subset=["prog_ex"])[["code", "disclosed_date", "prog_ex"]] \
+                .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date")
+            q = pd.merge_asof(q.sort_values("date"), pe.rename(columns={"disclosed_date": "d_pe"}),
+                              left_on="date", right_on="d_pe", by="code", direction="backward")
+            q.loc[(q["date"] - q["d_pe"]).dt.days > 100, "prog_ex"] = np.nan
+            so = g0[g0["shares_outstanding"] > 0][["code", "disclosed_date", "shares_outstanding"]] \
+                .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date")
+            q = pd.merge_asof(q.sort_values("date"), so.rename(columns={"disclosed_date": "d_so"}),
+                              left_on="date", right_on="d_so", by="code", direction="backward")
+            q["mcap"] = q["close"] * q["shares_outstanding"]
+            q = q.drop(columns=["d_pe", "d_so", "shares_outstanding"])
     except Exception as e:
         print(f"[警告] PBR・予想修正なし: {e}")
     # 仮説(2026-11-21 7回目)：業種ローテーション＝業種全体の20日騰落（中央値）
     q["sec20"] = q.groupby(["date", "sector"])["ret20"].transform("median")
+    # 仮説(2026-11-21 8回目)：業種全体の5日騰落（売られた業種の短期の戻り）
+    q["sec5"] = q.groupby(["date", "sector"])["ret5"].transform("median")
     return q.sort_values(["code", "date"]).reset_index(drop=True)
 
 
@@ -347,6 +368,10 @@ GRID = {
     "pbr":       [("<=", 0.7), ("<=", 1.0), (">=", 3.0)],
     "fc_rev":    [(">=", 0.05), (">=", 0.15), ("<=", -0.05)],
     "sec20":     [(">=", 0.05), ("<=", -0.05), ("<=", -0.10)],
+    # 仮説(2026-11-21 8回目)
+    "prog_ex":   [(">=", 0.10), (">=", 0.20), ("<=", -0.10)],
+    "mcap":      [("<=", 3e10), ("<=", 1e11), (">=", 5e11)],
+    "sec5":      [(">=", 0.03), ("<=", -0.03)],
 }
 
 LABEL = {
@@ -368,6 +393,7 @@ LABEL = {
     "rng20": "20日の値幅(高値-安値)/株価", "ma75_slope": "75日線の20日間の傾き", "dom": "日付(月の何日)",
     "shadow_lo": "下ヒゲの長さ/株価", "max1_20": "直近20日の最大の日次上昇率", "gc5": "25日線が75日線を上抜けて5日以内",
     "pbr": "PBR(株価/直近BPS)", "fc_rev": "会社予想(営業利益)の直近の修正率", "sec20": "業種全体の20日騰落(中央値)",
+    "prog_ex": "営業利益の進捗率-標準進捗(会社予想比)", "mcap": "時価総額", "sec5": "業種全体の5日騰落(中央値)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -379,7 +405,7 @@ def fmt_cond(f, op, th):
         return lab
     if f == "up_streak":
         return f"{lab} {op} {th:g}日"
-    if f == "tv20":
+    if f in ("tv20", "mcap"):
         return f"{lab} {op} {th/1e8:g}億円"
     if f in ("close",):
         return f"{lab} {op} {th:g}円"
