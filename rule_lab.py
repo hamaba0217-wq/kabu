@@ -536,6 +536,20 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["ac20"] = (xy - mx_ ** 2) / (sx_ ** 2).replace(0, np.nan)
     q["px_lvl"] = q["close"]
     q["clpos5"] = q.groupby("code", sort=False)["clpos"].transform(lambda s: s.rolling(5, min_periods=4).mean())
+    # 仮説(2026-11-22 30回目)：急落前の地合い＝t-20 から t-60 の騰落（急落前は強かった銘柄か）・その業種の中央値・
+    # 業種との60日相関（下げが業種要因か個別要因か）。すべて t 終値時点で確定
+    gc_ = q.groupby("code", sort=False)["close"]
+    q["pre_trend"] = gc_.shift(20) / gc_.shift(60) - 1
+    q["sec_pre"] = q.groupby(["date", "sector"])["pre_trend"].transform("median") if "sector" in q.columns else np.nan
+    if "sector" in q.columns:
+        smr = q.groupby(["date", "sector"])["ret1"].transform("median")
+        rr = lambda s: s.groupby(q["code"]).transform(lambda x: x.rolling(60, min_periods=40).mean())
+        cov_ = rr(q["ret1"] * smr) - rr(q["ret1"]) * rr(smr)
+        v1 = rr(q["ret1"] ** 2) - rr(q["ret1"]) ** 2
+        v2 = rr(smr ** 2) - rr(smr) ** 2
+        q["sec_corr60"] = cov_ / np.sqrt((v1 * v2).where(v1 * v2 > 0))
+    else:
+        q["sec_corr60"] = np.nan
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -715,6 +729,10 @@ GRID = {
     "opm_chg":   [(">=", 0.03), (">=", 0.01), ("<=", -0.02)],
     "fx_vol20":  [(">=", 0.008), (">=", 0.006), ("<=", 0.004)],
     "jgb2y_chg20": [(">=", 0.1), (">=", 0.05), ("<=", 0.0)],
+    # 仮説(2026-11-22 30回目)：急落前の地合い（個別・業種）・業種との60日相関
+    "pre_trend": [(">=", 0.15), (">=", 0.05), ("<=", -0.10)],
+    "sec_pre":   [(">=", 0.10), (">=", 0.03), ("<=", -0.05)],
+    "sec_corr60": [(">=", 0.6), (">=", 0.4), ("<=", 0.2)],
 }
 
 LABEL = {
@@ -771,6 +789,8 @@ LABEL = {
     "ac20": "日次リターンの20日自己相関", "px_lvl": "株価の水準(円)", "clpos5": "直近5日の引け位置の平均",
     "opm_chg": "営業利益率の前年同期比の変化(直近の決算)", "fx_vol20": "ドル円の20日ボラ(日次・前日)",
     "jgb2y_chg20": "日本2年金利の20日変化(%pt・前日)",
+    "pre_trend": "急落前の騰落(60日前→20日前)", "sec_pre": "業種の急落前の騰落(60日前→20日前・中央値)",
+    "sec_corr60": "業種との60日相関(日次騰落)",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -806,7 +826,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
