@@ -558,6 +558,13 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["sec_up_frac"] = (q["ret1"] > 0).astype(float).where(q["ret1"].notna()).groupby([q["date"], q["sector"]]).transform("mean")
     else:
         q["bounce_rel"] = q["sec_tv_rank"] = q["sec_up_frac"] = np.nan
+    # 仮説(2026-11-22 31回目2周目)：直近20日で最大の日次下落からの経過日数（ショックが新しいか古いか）・
+    # 売買代金の5日平均/60日平均（注目度が1週間単位で高まっているか）。すべて t 終値時点で確定
+    q["min1_days"] = q.groupby("code", sort=False)["ret1"].transform(
+        lambda s: s.rolling(20, min_periods=20).apply(lambda a: 19 - np.argmin(a), raw=True))
+    tv_ = q["turnover_value"] if "turnover_value" in q.columns else q["close"] * q["volume"]
+    gtv = tv_.groupby(q["code"])
+    q["tv5_60"] = gtv.transform(lambda s: s.rolling(5, min_periods=5).mean()) / gtv.transform(lambda s: s.rolling(60, min_periods=40).mean()).replace(0, np.nan)
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -745,6 +752,8 @@ GRID = {
     "bounce_rel": [(">=", 0.03), (">=", 0.0), ("<=", -0.03)],
     "sec_tv_rank": [(">=", 0.8), (">=", 0.5), ("<=", 0.3)],
     "sec_up_frac": [(">=", 0.7), (">=", 0.5), ("<=", 0.3)],
+    "min1_days": [("<=", 2), ("<=", 5), (">=", 12)],
+    "tv5_60":    [(">=", 2.0), (">=", 1.5), ("<=", 0.8)],
 }
 
 LABEL = {
@@ -805,6 +814,7 @@ LABEL = {
     "sec_corr60": "業種との60日相関(日次騰落)",
     "bounce_rel": "60日安値からの戻り−業種の中央値", "sec_tv_rank": "業種内の売買代金の順位(1=最大)",
     "sec_up_frac": "当日に上げた業種内の銘柄の割合",
+    "min1_days": "直近20日の最大の日次下落からの経過日数", "tv5_60": "売買代金の5日平均/60日平均",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -826,7 +836,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
@@ -840,7 +850,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
