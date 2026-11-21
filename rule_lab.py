@@ -311,6 +311,9 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     # 仮説(2026-11-21 20回目)：業種ぐるみの急落＝同じ業種で20日騰落が-15%以下の銘柄の割合
     # 仮説(2026-11-21 20回目2周目)：業種全体のその日の騰落（中央値）＝業種の反発初日・続落
     q["sec_ret1"] = q.groupby(["date", "sector"])["ret1"].transform("median")
+    # 仮説(2026-11-21 20回目3周目)：業種全体・市場全体の出来高の急増（出来高倍率の中央値）＝投げ売りの集中
+    q["sec_vratio"] = q.groupby(["date", "sector"])["vratio"].transform("median")
+    q["mkt_vratio"] = q.groupby("date")["vratio"].transform("median")
     q["sec_crash"] = (q["ret20"] <= -0.15).astype(float).where(q["ret20"].notna()).groupby([q["date"], q["sector"]]).transform("mean")
     q = q.drop(columns=["sec20_prev"])
     # 仮説(2026-11-21 9回目)：市場との連動（60日ベータ）・為替感応度（円安と株価の60日相関）
@@ -560,6 +563,8 @@ GRID = {
     "days_hi20": [("<=", 5), ("<=", 10), (">=", 15)],
     "sec_ret1":  [(">=", 0.02), (">=", 0.01), ("<=", -0.02)],
     "wti_ret5":  [(">=", 0.05), ("<=", -0.05)],
+    "sec_vratio": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
+    "mkt_vratio": [(">=", 1.3), (">=", 1.1), ("<=", 0.8)],
 }
 
 LABEL = {
@@ -596,6 +601,7 @@ LABEL = {
     "mfg": "製造業(東証33業種)",
     "vix_chg1": "VIXの1日変化(前日・ポイント)", "sec_crash": "同業種で20日騰落-15%以下の銘柄の割合", "days_hi20": "20日高値からの経過日数",
     "sec_ret1": "業種全体の当日の騰落(中央値)", "wti_ret5": "原油(WTI)の5日騰落(前日)",
+    "sec_vratio": "業種全体の出来高倍率(中央値)", "mkt_vratio": "市場全体の出来高倍率(中央値)",
 }
 POINT_FEATS = {"vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -631,7 +637,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
