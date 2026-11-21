@@ -238,6 +238,12 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     q["sec20"] = q.groupby(["date", "sector"])["ret20"].transform("median")
     # 仮説(2026-11-21 8回目)：業種全体の5日騰落（売られた業種の短期の戻り）
     q["sec5"] = q.groupby(["date", "sector"])["ret5"].transform("median")
+    # 仮説(2026-11-21 10回目)：業種内の20日騰落のばらつき・業種の勢いの変化（20日前の業種騰落との差）
+    q["sec_disp20"] = q.groupby(["date", "sector"])["ret20"].transform("std")
+    sd = q.groupby(["sector", "date"])["sec20"].first().groupby(level=0).shift(20).rename("sec20_prev").reset_index()
+    q = q.merge(sd, on=["sector", "date"], how="left")
+    q["sec_turn"] = q["sec20"] - q["sec20_prev"]
+    q = q.drop(columns=["sec20_prev"])
     # 仮説(2026-11-21 9回目)：市場との連動（60日ベータ）・為替感応度（円安と株価の60日相関）
     q = q.sort_values(["code", "date"]).reset_index(drop=True)
     gc = q["code"]
@@ -307,6 +313,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     g2 = q.groupby("code", sort=False)
     cross = (q["ma25"] > q["ma75"]) & (g2["ma25"].shift(1) <= g2["ma75"].shift(1))
     q["gc5"] = cross.astype(float).groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=1).max()).where(q["ma75"].notna())
+    # 仮説(2026-11-21 10回目)：直近20日のうち下落した日の割合（じり安＝売りが続いた銘柄）
+    q["down_frac20"] = (q["ret1"] < 0).astype(float).where(q["ret1"].notna())         .groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=20).mean())
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -399,6 +407,10 @@ GRID = {
     "hol_next":  [(">=", 1)],
     "beta60":    [(">=", 1.5), ("<=", 0.5)],
     "fx_corr60": [(">=", 0.3), ("<=", -0.1)],
+    # 仮説(2026-11-21 10回目)
+    "down_frac20": [(">=", 0.65), ("<=", 0.35)],
+    "sec_disp20": [(">=", 0.15), ("<=", 0.05)],
+    "sec_turn":  [(">=", 0.08), ("<=", -0.08)],
 }
 
 LABEL = {
@@ -422,6 +434,7 @@ LABEL = {
     "pbr": "PBR(株価/直近BPS)", "fc_rev": "会社予想(営業利益)の直近の修正率", "sec20": "業種全体の20日騰落(中央値)",
     "prog_ex": "営業利益の進捗率-標準進捗(会社予想比)", "mcap": "時価総額", "sec5": "業種全体の5日騰落(中央値)",
     "hol_next": "連休前(次の営業日まで休日を挟む)", "beta60": "市場に対する60日ベータ", "fx_corr60": "円安との60日相関(為替感応度)",
+    "down_frac20": "直近20日の下落日の割合", "sec_disp20": "業種内の20日騰落のばらつき", "sec_turn": "業種の20日騰落の変化(20日前比)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
