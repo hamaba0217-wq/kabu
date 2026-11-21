@@ -154,6 +154,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["sp500_ret1"] = m["sp500"].pct_change(1)
         x["sp500_ret20"] = m["sp500"].pct_change(20)
         x["nasdaq_ret5"] = m["nasdaq"].pct_change(5)
+        x["usdjpy_ret1"] = m["usdjpy"].pct_change(1)                    # 為替感応度の計算用（GRIDには入れない）
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
         x = x[~x.index.duplicated(keep="last")]
@@ -162,6 +163,10 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     ctx["month"] = ctx.index.month
     ctx["dow"] = ctx.index.dayofweek
     ctx["dom"] = ctx.index.day                                         # 仮説(2026-11-21 2回目)：月末・月初効果
+    # 仮説(2026-11-21 9回目)：連休前＝次の営業日までの暦日数（取引所の休日は事前に公表されているので先読みではない）
+    ds = pd.Series(dates, index=dates)
+    gapd = (ds.shift(-1) - ds).dt.days
+    ctx["hol_next"] = ((gapd >= 4) | ((ctx.index.dayofweek < 4) & (gapd >= 2))).astype(float).where(gapd.notna())
     ctx.index.name = "date"
     q = q.merge(ctx.reset_index(), on="date", how="left")
     # --- 業種内での相対的な強さ ---
@@ -233,6 +238,24 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     q["sec20"] = q.groupby(["date", "sector"])["ret20"].transform("median")
     # 仮説(2026-11-21 8回目)：業種全体の5日騰落（売られた業種の短期の戻り）
     q["sec5"] = q.groupby(["date", "sector"])["ret5"].transform("median")
+    # 仮説(2026-11-21 9回目)：市場との連動（60日ベータ）・為替感応度（円安と株価の60日相関）
+    q = q.sort_values(["code", "date"]).reset_index(drop=True)
+    gc = q["code"]
+
+    def _roll(s):
+        return s.groupby(gc).transform(lambda z: z.rolling(60, min_periods=40).mean())
+    x1 = q["ret1"]
+    m1 = q.groupby("date")["ret1"].transform("median")
+    cov = _roll(x1 * m1) - _roll(x1) * _roll(m1)
+    var = _roll(m1 * m1) - _roll(m1) ** 2
+    q["beta60"] = cov / var.replace(0, np.nan)
+    if "usdjpy_ret1" in q.columns:
+        ok = x1.notna() & q["usdjpy_ret1"].notna()
+        xa, fa = x1.where(ok), q["usdjpy_ret1"].where(ok)
+        cxy = _roll(xa * fa) - _roll(xa) * _roll(fa)
+        sx = (_roll(xa * xa) - _roll(xa) ** 2).clip(lower=0) ** 0.5
+        sf = (_roll(fa * fa) - _roll(fa) ** 2).clip(lower=0) ** 0.5
+        q["fx_corr60"] = cxy / (sx * sf).replace(0, np.nan)
     return q.sort_values(["code", "date"]).reset_index(drop=True)
 
 
@@ -372,6 +395,10 @@ GRID = {
     "prog_ex":   [(">=", 0.10), (">=", 0.20), ("<=", -0.10)],
     "mcap":      [("<=", 3e10), ("<=", 1e11), (">=", 5e11)],
     "sec5":      [(">=", 0.03), ("<=", -0.03)],
+    # 仮説(2026-11-21 9回目)
+    "hol_next":  [(">=", 1)],
+    "beta60":    [(">=", 1.5), ("<=", 0.5)],
+    "fx_corr60": [(">=", 0.3), ("<=", -0.1)],
 }
 
 LABEL = {
@@ -394,6 +421,7 @@ LABEL = {
     "shadow_lo": "下ヒゲの長さ/株価", "max1_20": "直近20日の最大の日次上昇率", "gc5": "25日線が75日線を上抜けて5日以内",
     "pbr": "PBR(株価/直近BPS)", "fc_rev": "会社予想(営業利益)の直近の修正率", "sec20": "業種全体の20日騰落(中央値)",
     "prog_ex": "営業利益の進捗率-標準進捗(会社予想比)", "mcap": "時価総額", "sec5": "業種全体の5日騰落(中央値)",
+    "hol_next": "連休前(次の営業日まで休日を挟む)", "beta60": "市場に対する60日ベータ", "fx_corr60": "円安との60日相関(為替感応度)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -401,7 +429,7 @@ DOW = "月火水木金"
 
 def fmt_cond(f, op, th):
     lab = LABEL.get(f, f)
-    if f in ("ma_up", "new_hi", "gc5"):
+    if f in ("ma_up", "new_hi", "gc5", "hol_next"):
         return lab
     if f == "up_streak":
         return f"{lab} {op} {th:g}日"
