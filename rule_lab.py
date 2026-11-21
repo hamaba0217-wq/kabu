@@ -96,6 +96,13 @@ def load_data(fetch: bool) -> pd.DataFrame:
     if "sector" not in q.columns:
         q["sector"] = "不明"
     q["sector"] = q["sector"].fillna("不明")
+    # 仮説(2026-11-21 18回目)：市場区分（1=プライム・2=スタンダード・3=グロース。現在の区分を使う）
+    q["mkt_seg"] = np.nan
+    if lst is not None and "market" in lst.columns and "code" in lst.columns:
+        ms = lst[["code", "market"]].drop_duplicates("code").copy()
+        ms["code"] = ms["code"].astype(str)
+        ms["mkt_seg"] = ms["market"].map({"プライム": 1.0, "スタンダード": 2.0, "グロース": 3.0})
+        q = q.drop(columns=["mkt_seg"]).merge(ms[["code", "mkt_seg"]], on="code", how="left")
     return q
 
 
@@ -157,6 +164,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["us_dd60"] = m["sp500"] / m["sp500"].rolling(60, min_periods=40).max() - 1   # 仮説(14回目)：米国株の60日高値からの下落
         x["usdjpy_ret5"] = m["usdjpy"].pct_change(5)                    # 仮説(17回目)：為替の短期の急変（円高・円安ショック）
         x["usdjpy_ret1"] = m["usdjpy"].pct_change(1)                    # 為替感応度の計算用（GRIDには入れない）
+        x["vix_rel60"] = m["vix"] / m["vix"].rolling(60, min_periods=40).mean()   # 仮説(18回目)：VIXの60日平均に対する水準
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
         x = x[~x.index.duplicated(keep="last")]
@@ -377,6 +385,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     # 仮説(2026-11-21 15回目)：市場全体の荒れ具合＝その日の全銘柄の騰落のばらつき（標準偏差）の5日平均
     xd = q.groupby("date")["ret1"].std().sort_index().rolling(5, min_periods=5).mean().rename("xs_disp5")
     q = q.merge(xd, on="date", how="left")
+    # 仮説(2026-11-21 18回目)：個別の窓＝その銘柄の当日の窓 − 全銘柄の窓の中央値（市場要因を除いた寄り付きの売られ方）
+    q["xs_gap"] = q["gap"] - q.groupby("date")["gap"].transform("median")
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -498,6 +508,10 @@ GRID = {
     "usdjpy_ret5": [(">=", 0.015), ("<=", -0.015), ("<=", -0.01), ("<=", 0.0)],
     "rev_up":    [(">=", 1)],
     "hit_hist":  [(">=", 0.5), (">=", 0.3), ("<=", 0.05)],
+    # 仮説(2026-11-21 18回目)：個別の窓・VIXの相対水準・市場区分
+    "xs_gap":    [("<=", -0.05), ("<=", -0.03), (">=", 0.03)],
+    "vix_rel60": [(">=", 1.3), (">=", 1.15), ("<=", 0.85)],
+    "mkt_seg":   [("==", 1), ("==", 2), ("==", 3), ("<=", 2)],
 }
 
 LABEL = {
@@ -528,6 +542,7 @@ LABEL = {
     "ovn20": "夜間(前日終値→始値)の20日累計騰落", "intra20": "日中(始値→終値)の20日累計騰落", "ovn5": "夜間(前日終値→始値)の5日累計騰落",
     "xs_disp5": "市場全体の騰落のばらつき(5日平均)", "fc_growth": "今期見通しの伸び(会社予想営業利益/前期実績)",
     "usdjpy_ret5": "ドル円の5日変化(前日)", "rev_up": "上向きの反転足(前日下落・終値が前日高値超え)", "hit_hist": "過去の+10%到達率(確定済みの直近60回)",
+    "xs_gap": "個別の窓(当日の窓-全銘柄の窓の中央値)", "vix_rel60": "VIXの60日平均に対する倍率(前日)", "mkt_seg": "市場区分(1=プライム 2=スタンダード 3=グロース)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -555,7 +570,11 @@ def fmt_cond(f, op, th):
         return f"{lab} {op} {th*100:g}%"
     if f in POINT_FEATS:
         return f"{lab} {op} {th:g}"
-    if f in ("vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp"):
+    if f == "mkt_seg":
+        if op == "<=" and th == 2:
+            return "グロース以外(プライム・スタンダード)"
+        return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
+    if f in ("vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 

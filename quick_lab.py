@@ -79,12 +79,13 @@ def main():
             f"n={base['n']} 平均損益 {L.pct(base['pnl'], 2)}")
     print(head)
 
-    if a.combo:
-        cs = parse_combo(a.combo)
-        r = L.evaluate(q, cs, edges)
-        print(" かつ ".join(L.fmt_cond(*c) for c in cs))
-        print(f"  n={r['n']} 勝率 {L.pct(r.get('win'))} 平均損益 {L.pct(r.get('pnl'), 2)} "
-              f"各期間 {[(s['n'], L.pct(s['win']), L.pct(s['pnl'], 2)) for s in r.get('splits', [])]}")
+    if a.combo:   # 「|」で区切ると複数の組み合わせを1回の読み込みで評価
+        for one in a.combo.split("|"):
+            cs = parse_combo(one)
+            r = L.evaluate(q, cs, edges)
+            print(" かつ ".join(L.fmt_cond(*c) for c in cs))
+            print(f"  n={r['n']} 勝率 {L.pct(r.get('win'))} 平均損益 {L.pct(r.get('pnl'), 2)} "
+                  f"各期間 {[(s['n'], L.pct(s['win']), L.pct(s['pnl'], 2)) for s in r.get('splits', [])]}")
         return
 
     only = {x.strip() for x in a.only.split(",") if x.strip()}
