@@ -479,6 +479,13 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["illiq20"] = am.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=15).mean())
     xsk = q.groupby("date")["ret5"].skew().rename("xs_skew5")
     q = q.merge(xsk, on="date", how="left")
+    # 仮説(2026-11-22 26回目)：ボラで割った下げの深さ（20日騰落/(60日の日次ボラ×√20)＝その銘柄にとって異例の下げか）・
+    # 窓を開けて下げた日の日中の戻り（(終値-始値)/(前日終値-始値)、窓≤-2%のみ）・60日安値からの経過日数。すべて t 終値時点で確定
+    sd60b = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(60, min_periods=40).std())
+    q["z_drop20"] = q["ret20"] / (sd60b * np.sqrt(20)).replace(0, np.nan)
+    pc = q.groupby("code", sort=False)["close"].shift(1)
+    q["gap_rec"] = ((q["close"] - q["open"]) / (pc - q["open"]).replace(0, np.nan)).where(q["gap"] <= -0.02)
+    q["lo_days60"] = q.groupby("code", sort=False)["low"].transform(lambda s: s.rolling(60, min_periods=40).apply(lambda a: len(a) - 1 - np.argmin(a), raw=True))
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
@@ -647,6 +654,10 @@ GRID = {
     "skew60":    [(">=", 1.0), (">=", 0.3), ("<=", -0.5)],
     "illiq20":   [(">=", 0.005), (">=", 0.002), ("<=", 0.0005)],
     "xs_skew5":  [(">=", 1.0), ("<=", -1.0), ("<=", 0.0)],
+    # 仮説(2026-11-22 26回目)：ボラで割った下げの深さ・窓を開けて下げた日の日中の戻り・60日安値からの経過日数
+    "z_drop20":  [("<=", -2.5), ("<=", -1.5), (">=", 0.0)],
+    "gap_rec":   [(">=", 1.0), (">=", 0.5), ("<=", 0.0)],
+    "lo_days60": [("<=", 0), ("<=", 3), (">=", 20)],
 }
 
 LABEL = {
@@ -694,6 +705,8 @@ LABEL = {
     "vol_climax": "出来高のクライマックス(当日/前60日の最大)",
     "skew60": "日次騰落の歪度(60日)", "illiq20": "非流動性(|日次騰落|/売買代金億円, 20日平均)",
     "xs_skew5": "市場全体の5日騰落の歪度(全銘柄)",
+    "z_drop20": "ボラで割った20日騰落(20日騰落/(60日ボラ×√20))", "gap_rec": "窓を開けて下げた日の日中の戻り(窓≤-2%)",
+    "lo_days60": "60日安値からの経過日数",
 }
 POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -715,7 +728,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f == "days_hi20":
+    if f in ("days_hi20", "lo_days60"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
