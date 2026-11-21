@@ -386,6 +386,16 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         sx = (_roll(xa * xa) - _roll(xa) ** 2).clip(lower=0) ** 0.5
         sf = (_roll(fa * fa) - _roll(fa) ** 2).clip(lower=0) ** 0.5
         q["fx_corr60"] = cxy / (sx * sf).replace(0, np.nan)
+    # 仮説(2026-11-22 33回目)：前夜の米国株(S&P500)との60日相関（外需・米国連動株か）。sp500_ret1 は前日までの確定値
+    if "sp500_ret1" in q.columns:
+        ok = x1.notna() & q["sp500_ret1"].notna()
+        xa, fa = x1.where(ok), q["sp500_ret1"].where(ok)
+        cxy = _roll(xa * fa) - _roll(xa) * _roll(fa)
+        sx = (_roll(xa * xa) - _roll(xa) ** 2).clip(lower=0) ** 0.5
+        sf = (_roll(fa * fa) - _roll(fa) ** 2).clip(lower=0) ** 0.5
+        q["us_corr60"] = cxy / (sx * sf).replace(0, np.nan)
+    else:
+        q["us_corr60"] = np.nan
     # 仮説(2026-11-21 19回目)：市場要因を除いた20日騰落＝20日騰落 − 60日ベータ×市場全体の20日騰落（個別の悪材料による下げ）
     q["idio20"] = q["ret20"] - q["beta60"].clip(-1, 3) * q["mkt20"]
     # 仮説(2026-11-21 19回目)：市場全体の投げ売り度＝20日騰落が-20%以下の銘柄の割合（t 終値で確定）
@@ -572,6 +582,10 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     r20_ = gh_.transform(lambda s: s.rolling(20, min_periods=20).max()) - gl_.transform(lambda s: s.rolling(20, min_periods=20).min())
     q["rng5_20"] = r5_ / r20_.replace(0, np.nan)
     q["dev5"] = q["close"] / q.groupby("code", sort=False)["close"].transform(lambda s: s.rolling(5, min_periods=5).mean()) - 1
+    # 仮説(2026-11-22 33回目)：業種内・市場全体で25日線より上にある銘柄の割合（業種・市場の地合いの広がり）。t 終値で確定
+    ab25 = (q["dev25"] > 0).astype(float).where(q["dev25"].notna())
+    q["mkt_above25"] = ab25.groupby(q["date"]).transform("mean")
+    q["sec_above25"] = ab25.groupby([q["date"], q["sector"]]).transform("mean") if "sector" in q.columns else np.nan
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -763,6 +777,10 @@ GRID = {
     "tv5_60":    [(">=", 2.0), (">=", 1.5), ("<=", 0.8)],
     "rng5_20":   [("<=", 0.3), ("<=", 0.45), (">=", 0.8)],
     "dev5":      [(">=", 0.03), (">=", 0.0), ("<=", -0.03)],
+    # 仮説(2026-11-22 33回目)：米国株との60日相関・業種内/市場全体で25日線より上の割合
+    "us_corr60": [(">=", 0.3), (">=", 0.15), ("<=", 0.0)],
+    "sec_above25": [("<=", 0.1), ("<=", 0.25), (">=", 0.6)],
+    "mkt_above25": [("<=", 0.2), ("<=", 0.35), (">=", 0.6)],
 }
 
 LABEL = {
@@ -825,6 +843,8 @@ LABEL = {
     "sec_up_frac": "当日に上げた業種内の銘柄の割合",
     "min1_days": "直近20日の最大の日次下落からの経過日数", "tv5_60": "売買代金の5日平均/60日平均",
     "rng5_20": "直近5日の値幅/直近20日の値幅", "dev5": "5日線乖離",
+    "us_corr60": "前夜の米国株(S&P500)との60日相関", "sec_above25": "業種内で25日線より上の銘柄の割合",
+    "mkt_above25": "市場全体で25日線より上の銘柄の割合",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -860,7 +880,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
