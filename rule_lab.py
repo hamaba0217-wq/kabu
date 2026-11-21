@@ -509,6 +509,15 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q = q.merge((mix / mix.rolling(60, min_periods=40).max() - 1).rename("mkt_dd60"), on="date", how="left")
     q["sec_rank20"] = q.groupby(["date", "sector"])["ret20"].rank(pct=True) if "sector" in q.columns else np.nan
     q["hammer5"] = (q["shadow_lo"] >= 0.02).astype(float).where(q["shadow_lo"].notna()).groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=5).sum())
+    # 仮説(2026-11-22 28回目)：日次リターンの20日の1次自己相関（負＝行き過ぎが戻りやすい銘柄）・株価の水準（低位株は%で動きやすい）・
+    # 直近5日の引け位置（当日レンジ内の終値位置）の平均（引けにかけて買われる日が続くか）。すべて t 終値時点で確定
+    r1p = q.groupby("code", sort=False)["ret1"].shift(1)
+    xy = (q["ret1"] * r1p).groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=15).mean())
+    mx_ = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(20, min_periods=15).mean())
+    sx_ = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(20, min_periods=15).std())
+    q["ac20"] = (xy - mx_ ** 2) / (sx_ ** 2).replace(0, np.nan)
+    q["px_lvl"] = q["close"]
+    q["clpos5"] = q.groupby("code", sort=False)["clpos"].transform(lambda s: s.rolling(5, min_periods=4).mean())
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -680,6 +689,10 @@ GRID = {
     "mkt_dd60":  [("<=", -0.10), ("<=", -0.05), (">=", -0.01)],
     "sec_rank20": [("<=", 0.1), ("<=", 0.25), (">=", 0.75)],
     "hammer5":   [(">=", 3), (">=", 2), ("<=", 0)],
+    # 仮説(2026-11-22 28回目)：日次リターンの自己相関・株価の水準・直近5日の引け位置の平均
+    "ac20":      [("<=", -0.3), ("<=", -0.15), (">=", 0.15)],
+    "px_lvl":    [("<=", 300), ("<=", 1000), (">=", 5000)],
+    "clpos5":    [(">=", 0.65), ("<=", 0.35), ("<=", 0.25)],
 }
 
 LABEL = {
@@ -733,6 +746,7 @@ LABEL = {
     "sec_rel5": "業種の5日騰落-市場全体の5日騰落",
     "mkt_dd60": "日本の市場全体の60日高値からの下落(中央値指数)", "sec_rank20": "業種内の20日騰落の順位(0=最も下げた)",
     "hammer5": "直近5日で下ヒゲ≥2%の日数",
+    "ac20": "日次リターンの20日自己相関", "px_lvl": "株価の水準(円)", "clpos5": "直近5日の引け位置の平均",
 }
 POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -768,7 +782,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
