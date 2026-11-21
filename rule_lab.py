@@ -183,6 +183,35 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             q = q.drop(columns=["last_disc"])
     except Exception as e:
         print(f"[警告] 決算日データなし: {e}")
+    # 仮説(2026-11-21 7回目)：PBR・会社予想（営業利益）の修正率（発表日当日までに開示された値のみ）
+    try:
+        import cache
+        f = cache.load("fin")
+        if f is not None and {"bps", "fc_operating_profit", "period_type"} <= set(f.columns):
+            f = f[["code", "disclosed_date", "period_type", "bps", "fc_operating_profit"]].copy()
+            f["code"] = f["code"].astype(str)
+            f["disclosed_date"] = pd.to_datetime(f["disclosed_date"])
+            f = f.sort_values(["code", "disclosed_date"])
+            b = f.dropna(subset=["bps"])
+            b = b[b["bps"] > 0][["code", "disclosed_date", "bps"]].drop_duplicates(["code", "disclosed_date"], keep="last")
+            fc = f.dropna(subset=["fc_operating_profit"]).drop_duplicates(["code", "disclosed_date"], keep="last").copy()
+            prev = fc.groupby("code")["fc_operating_profit"].shift(1)
+            pgap = (fc["disclosed_date"] - fc.groupby("code")["disclosed_date"].shift(1)).dt.days
+            ok = (fc["period_type"] != "FY") & (pgap <= 200) & (prev.abs() > 0)   # FYの発表は翌期の予想に切り替わるので除外
+            fc["fc_rev"] = np.where(ok, (fc["fc_operating_profit"] - prev) / prev.abs(), np.nan)
+            fc = fc.dropna(subset=["fc_rev"])[["code", "disclosed_date", "fc_rev"]]
+            q = q.sort_values("date")
+            q = pd.merge_asof(q, b.sort_values("disclosed_date").rename(columns={"disclosed_date": "d_bps"}),
+                              left_on="date", right_on="d_bps", by="code", direction="backward")
+            q["pbr"] = q["close"] / q["bps"]
+            q = pd.merge_asof(q, fc.sort_values("disclosed_date").rename(columns={"disclosed_date": "d_fc"}),
+                              left_on="date", right_on="d_fc", by="code", direction="backward")
+            q.loc[(q["date"] - q["d_fc"]).dt.days > 100, "fc_rev"] = np.nan   # 古い修正は使わない
+            q = q.drop(columns=["d_bps", "bps", "d_fc"])
+    except Exception as e:
+        print(f"[警告] PBR・予想修正なし: {e}")
+    # 仮説(2026-11-21 7回目)：業種ローテーション＝業種全体の20日騰落（中央値）
+    q["sec20"] = q.groupby(["date", "sector"])["ret20"].transform("median")
     return q.sort_values(["code", "date"]).reset_index(drop=True)
 
 
@@ -314,6 +343,10 @@ GRID = {
     "shadow_lo": [(">=", 0.02), (">=", 0.04)],
     "max1_20":   [(">=", 0.08), (">=", 0.15), ("<=", 0.02)],
     "gc5":       [(">=", 1)],
+    # 仮説(2026-11-21 7回目)
+    "pbr":       [("<=", 0.7), ("<=", 1.0), (">=", 3.0)],
+    "fc_rev":    [(">=", 0.05), (">=", 0.15), ("<=", -0.05)],
+    "sec20":     [(">=", 0.05), ("<=", -0.05), ("<=", -0.10)],
 }
 
 LABEL = {
@@ -334,6 +367,7 @@ LABEL = {
     "up_streak": "連続陽線の日数", "vdry": "出来高の枯れ(5日平均/前60日平均)", "new_hi": "52週高値を終値で更新",
     "rng20": "20日の値幅(高値-安値)/株価", "ma75_slope": "75日線の20日間の傾き", "dom": "日付(月の何日)",
     "shadow_lo": "下ヒゲの長さ/株価", "max1_20": "直近20日の最大の日次上昇率", "gc5": "25日線が75日線を上抜けて5日以内",
+    "pbr": "PBR(株価/直近BPS)", "fc_rev": "会社予想(営業利益)の直近の修正率", "sec20": "業種全体の20日騰落(中央値)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -361,7 +395,7 @@ def fmt_cond(f, op, th):
         return f"{lab} {op} {th*100:g}%"
     if f in POINT_FEATS:
         return f"{lab} {op} {th:g}"
-    if f in ("vratio", "rsi14", "clpos", "vdry"):
+    if f in ("vratio", "rsi14", "clpos", "vdry", "pbr"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
