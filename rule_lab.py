@@ -441,6 +441,15 @@ def candidates(champ_conds, tested):
     """チャンピオン + 条件1つ追加 / 条件1つ差し替え / 条件1つ削除 / 単独・2条件の新規"""
     singles = [[f, op, th] for f, lst in GRID.items() for op, th in lst]
     out = []
+    # 研究担当が手元データの速報で有望と見た組み合わせ（rules/seeds.json）を最優先で検証
+    try:
+        for s in json.load(open(os.path.join("rules", "seeds.json"), encoding="utf-8")).get("seeds", []):
+            cs = [list(c) for c in s.get("conds", [])]
+            out.append(cs)
+            if champ_conds:
+                out.append(champ_conds + [c for c in cs if c[0] not in {x[0] for x in champ_conds}])
+    except Exception:
+        pass
     used = {c[0] for c in champ_conds}
     for s in singles:                      # 1つ追加
         if s[0] not in used:

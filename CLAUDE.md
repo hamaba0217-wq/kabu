@@ -14,6 +14,8 @@
 | 動作テスト（架空データ・APIキー不要） | smoke_rule_lab.py | 変更したら必ず |
 | 結果 | rules/state.json, rules/RULES.md, rules/feature_report.md, docs/rules.html | Actions が push |
 | 研究の記録 | rules/research_log.md | 研究担当のAIが追記 |
+| 速報（PCの手元データ・短期間）で仮説をすぐ確かめる | quick_lab.py → rules/quick_report.md | PCの研究担当（data/ がある環境のみ） |
+| 有望な組み合わせを Actions に優先検証させる | rules/seeds.json | 研究担当が追記。rule_lab.py が最優先で検証 |
 
 **勝ちの定義（利用者指定・変更禁止）**：シグナル翌営業日の始値で買い、20営業日以内に高値が+10%に届けば勝ち。届かなければ20営業日目の終値で売る。
 
@@ -31,6 +33,10 @@
    - **先読み禁止**：判定日 t の終値時点で確定している値だけを使う。外部指標は1営業日ずらす。
 4. rule_lab.py に実装する：特徴量の計算（add_features / add_context）、`GRID` に条件、`LABEL` に日本語名、必要なら `fmt_cond`。既存の勝ちの定義・採用基準・出力は変えない。
 5. `python smoke_rule_lab.py` を実行し **SMOKE OK** を確認。失敗したら直す。直せなければ変更を取り消す。
+   - **data/ がある環境（PC）では、続けて `py quick_lab.py` で実データの速報を取る**（約1分）。新しい要因の効き目を確かめ、`py quick_lab.py --combo "ret20<=-0.2;vix_chg5>=3"` で組み合わせも試す。
+   - 速報で「取引数150以上・3期間とも30以上・3期間とも平均損益プラス・勝率が基準より大きく上」の組み合わせは rules/seeds.json に追加する（memo に日付と速報値）。Actions が長期間データで最優先に検証し、採用基準を満たせば採用される。
+   - 速報は期間が短く偶然が混ざりやすい。速報だけで「効いた」と断定しない（研究ログには「速報」と明記）。
+   - push すると Actions の待機中の実行は新しいものに置き換わるが、実行中のものは取り消されない。
 6. rules/research_log.md の先頭に追記：日時、結果の解釈（数値を引用）、追加した仮説と理由、状態「結果待ち」。
 7. コミットして main に push（`git pull --rebase` してから）。main に push できない環境では `claude/research-日付` ブランチに push し、報告で「main への取り込みが必要」と伝える（自動では取り込まれない）。
 8. 最後に日本語で2〜3行の報告。
