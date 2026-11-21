@@ -172,6 +172,9 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["us10y_chg5"] = m["us10y"] - m["us10y"].shift(5)
         x["vix_pk20"] = m["vix"] / m["vix"].rolling(20, min_periods=15).max()
         x["spread_chg20"] = (m["us10y"] - m["jgb10y"]) - (m["us10y"] - m["jgb10y"]).shift(20)   # 仮説(19回目)：日米10年金利差の20日変化
+        # 仮説(2026-11-22 29回目)：ドル円の20日ボラ（為替の不安定さ）・日本2年金利の20日変化（日銀の利上げ観測）
+        x["fx_vol20"] = m["usdjpy"].pct_change().rolling(20, min_periods=15).std()
+        x["jgb2y_chg20"] = m["jgb2y"] - m["jgb2y"].shift(20)
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
         x = x[~x.index.duplicated(keep="last")]
@@ -317,6 +320,21 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
                               left_on="date", right_on="d_syoy", by="code", direction="backward")
             q.loc[(q["date"] - q["d_syoy"]).dt.days > 100, "sales_yoy"] = np.nan
             q = q.drop(columns=["d_syoy"])
+            # 仮説(2026-11-22 29回目)：営業利益率の前年同期比の変化（%pt。同じ四半期区分の約1年前の開示と比較、発表日当日までの値のみ）
+            gm = g0[["code", "disclosed_date", "period_type", "operating_profit", "net_sales"]].dropna(subset=["operating_profit", "net_sales"])                 .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date").copy()
+            gm = gm[gm["net_sales"] > 0]
+            gm["opm"] = gm["operating_profit"] / gm["net_sales"]
+            gm["d_prev"] = gm["disclosed_date"] - pd.Timedelta(days=365)
+            pm_ = gm[["code", "period_type", "disclosed_date", "opm"]].rename(
+                columns={"disclosed_date": "d_pm", "opm": "opm_py"}).sort_values("d_pm")
+            gm = pd.merge_asof(gm.sort_values("d_prev"), pm_, left_on="d_prev", right_on="d_pm",
+                               by=["code", "period_type"], direction="nearest", tolerance=pd.Timedelta(days=60))
+            gm["opm_chg"] = gm["opm"] - gm["opm_py"]
+            gm = gm.dropna(subset=["opm_chg"])[["code", "disclosed_date", "opm_chg"]].sort_values("disclosed_date")
+            q = pd.merge_asof(q.sort_values("date"), gm.rename(columns={"disclosed_date": "d_opm"}),
+                              left_on="date", right_on="d_opm", by="code", direction="backward")
+            q.loc[(q["date"] - q["d_opm"]).dt.days > 100, "opm_chg"] = np.nan
+            q = q.drop(columns=["d_opm"])
     except Exception as e:
         print(f"[警告] PBR・予想修正なし: {e}")
     # 仮説(2026-11-21 7回目)：業種ローテーション＝業種全体の20日騰落（中央値）
@@ -693,6 +711,10 @@ GRID = {
     "ac20":      [("<=", -0.3), ("<=", -0.15), (">=", 0.15)],
     "px_lvl":    [("<=", 300), ("<=", 1000), (">=", 5000)],
     "clpos5":    [(">=", 0.65), ("<=", 0.35), ("<=", 0.25)],
+    # 仮説(2026-11-22 29回目)：営業利益率の前年同期比の変化・ドル円の20日ボラ・日本2年金利の20日変化
+    "opm_chg":   [(">=", 0.03), (">=", 0.01), ("<=", -0.02)],
+    "fx_vol20":  [(">=", 0.008), (">=", 0.006), ("<=", 0.004)],
+    "jgb2y_chg20": [(">=", 0.1), (">=", 0.05), ("<=", 0.0)],
 }
 
 LABEL = {
@@ -747,8 +769,10 @@ LABEL = {
     "mkt_dd60": "日本の市場全体の60日高値からの下落(中央値指数)", "sec_rank20": "業種内の20日騰落の順位(0=最も下げた)",
     "hammer5": "直近5日で下ヒゲ≥2%の日数",
     "ac20": "日次リターンの20日自己相関", "px_lvl": "株価の水準(円)", "clpos5": "直近5日の引け位置の平均",
+    "opm_chg": "営業利益率の前年同期比の変化(直近の決算)", "fx_vol20": "ドル円の20日ボラ(日次・前日)",
+    "jgb2y_chg20": "日本2年金利の20日変化(%pt・前日)",
 }
-POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
+POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
 
 
