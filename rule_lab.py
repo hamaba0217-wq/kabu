@@ -407,6 +407,10 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["xs_gap"] = q["gap"] - q.groupby("date")["gap"].transform("median")
     # 仮説(2026-11-21 19回目2周目)：市場全体の窓（全銘柄の窓の中央値＝寄り付きの一斉の売り/買い）・52週安値を終値で割り込み
     q["mkt_gap"] = q.groupby("date")["gap"].transform("median")
+    # 仮説(2026-11-21 19回目4周目)：製造業（景気・為替・海外株に敏感な業種）かどうか（東証33業種で判定）
+    MFG = {"食料品", "繊維製品", "パルプ･紙", "化学", "医薬品", "石油･石炭製品", "ゴム製品", "ガラス･土石製品", "鉄鋼",
+           "非鉄金属", "金属製品", "機械", "電気機器", "輸送用機器", "精密機器", "その他製品"}
+    q["mfg"] = q["sector"].isin(MFG).astype(float).where(q["sector"].notna()) if "sector" in q.columns else np.nan
     plo = g["low"].transform(lambda s: s.shift(1).rolling(250, min_periods=120).min())
     q["new_lo"] = (c < plo).astype(float).where(plo.notna())
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
@@ -541,6 +545,7 @@ GRID = {
     "mkt_gap":   [("<=", -0.015), ("<=", -0.008), (">=", 0.01)],
     "new_lo":    [(">=", 1)],
     "op_yoy":    [(">=", 0.30), (">=", 0.10), ("<=", -0.20)],
+    "mfg":       [(">=", 1), ("<=", 0)],
 }
 
 LABEL = {
@@ -574,6 +579,7 @@ LABEL = {
     "xs_gap": "個別の窓(当日の窓-全銘柄の窓の中央値)", "vix_rel60": "VIXの60日平均に対する倍率(前日)", "mkt_seg": "市場区分(1=プライム 2=スタンダード 3=グロース)",
     "idio20": "市場要因を除いた20日騰落(ベータ調整)", "frac_crash": "20日騰落-20%以下の銘柄の割合(市場全体)", "spread_chg20": "日米10年金利差の20日変化(%pt)",
     "mkt_gap": "市場全体の窓(全銘柄の窓の中央値)", "new_lo": "52週安値を終値で割り込み", "op_yoy": "営業利益の前年同期比(直近の決算)",
+    "mfg": "製造業(東証33業種)",
 }
 POINT_FEATS = {"spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -605,6 +611,8 @@ def fmt_cond(f, op, th):
         if op == "<=" and th == 2:
             return "グロース以外(プライム・スタンダード)"
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
+    if f == "mfg":
+        return "製造業" if op == ">=" else "非製造業"
     if f in ("vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
