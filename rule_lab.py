@@ -550,6 +550,14 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["sec_corr60"] = cov_ / np.sqrt((v1 * v2).where(v1 * v2 > 0))
     else:
         q["sec_corr60"] = np.nan
+    # 仮説(2026-11-22 31回目)：60日安値からの戻りの業種内での先行度（銘柄の戻り−業種の中央値）・業種内の売買代金の順位（業種の主力株か）・
+    # 当日に上げた業種内の銘柄の割合（業種ぐるみの反転の日か）。すべて t 終値時点で確定
+    if "sector" in q.columns:
+        q["bounce_rel"] = q["from_lo60"] - q.groupby(["date", "sector"])["from_lo60"].transform("median")
+        q["sec_tv_rank"] = q.groupby(["date", "sector"])["tv20"].rank(pct=True)
+        q["sec_up_frac"] = (q["ret1"] > 0).astype(float).where(q["ret1"].notna()).groupby([q["date"], q["sector"]]).transform("mean")
+    else:
+        q["bounce_rel"] = q["sec_tv_rank"] = q["sec_up_frac"] = np.nan
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -733,6 +741,10 @@ GRID = {
     "pre_trend": [(">=", 0.15), (">=", 0.05), ("<=", -0.10)],
     "sec_pre":   [(">=", 0.10), (">=", 0.03), ("<=", -0.05)],
     "sec_corr60": [(">=", 0.6), (">=", 0.4), ("<=", 0.2)],
+    # 仮説(2026-11-22 31回目)：業種内の戻りの先行度・業種内の売買代金の順位・当日に上げた業種内の割合
+    "bounce_rel": [(">=", 0.03), (">=", 0.0), ("<=", -0.03)],
+    "sec_tv_rank": [(">=", 0.8), (">=", 0.5), ("<=", 0.3)],
+    "sec_up_frac": [(">=", 0.7), (">=", 0.5), ("<=", 0.3)],
 }
 
 LABEL = {
@@ -791,6 +803,8 @@ LABEL = {
     "jgb2y_chg20": "日本2年金利の20日変化(%pt・前日)",
     "pre_trend": "急落前の騰落(60日前→20日前)", "sec_pre": "業種の急落前の騰落(60日前→20日前・中央値)",
     "sec_corr60": "業種との60日相関(日次騰落)",
+    "bounce_rel": "60日安値からの戻り−業種の中央値", "sec_tv_rank": "業種内の売買代金の順位(1=最大)",
+    "sec_up_frac": "当日に上げた業種内の銘柄の割合",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -826,7 +840,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
