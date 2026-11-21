@@ -640,6 +640,18 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     else:
         q["sec_ab25_chg5"] = np.nan
     q["jp_us_dd"] = q["mkt_dd60"] - q["us_dd60"] if "us_dd60" in q.columns else np.nan
+    # 仮説(2026-11-22 39回目)：直近20日で出来高が最大だった日の騰落（投げ売りの日か、買い集めの日か）・その日からの経過日数・
+    # 10日騰落（20日より短い下げの速さ）。すべて t 終値時点で確定
+    vol_ = q["volume"].astype(float)
+    vidx = vol_.groupby(q["code"], sort=False).transform(
+        lambda s: s.rolling(20, min_periods=20).apply(lambda a: 19 - np.argmax(a), raw=True))
+    q["vmax_days"] = vidx
+    r1s = {k: q.groupby("code", sort=False)["ret1"].shift(k) for k in range(20)}
+    vr = pd.Series(np.nan, index=q.index)
+    for k in range(20):
+        vr = vr.where(vidx != k, r1s[k])
+    q["vmax_ret"] = vr
+    q["ret10"] = q.groupby("code", sort=False)["close"].transform(lambda s: s / s.shift(10) - 1)
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -850,6 +862,9 @@ GRID = {
     "oil_corr60": [(">=", 0.15), (">=", 0.05), ("<=", -0.1)],
     "sec_ab25_chg5": [(">=", 0.2), (">=", 0.05), ("<=", -0.2)],
     "jp_us_dd": [("<=", -0.08), ("<=", -0.04), (">=", 0.02)],
+    "vmax_ret": [("<=", -0.05), ("<=", -0.02), (">=", 0.02)],
+    "vmax_days": [("<=", 2), ("<=", 6), (">=", 12)],
+    "ret10": [("<=", -0.15), ("<=", -0.08), (">=", 0.05)],
 }
 
 LABEL = {
@@ -922,6 +937,8 @@ LABEL = {
     "gap_dn_cnt20": "直近20日で窓≤-2%を開けて下げた日数",
     "oil_corr60": "前日の原油(WTI)との60日相関", "sec_ab25_chg5": "業種内で25日線より上の割合の5日変化",
     "jp_us_dd": "日本株と米国株の60日高値からの下落の差",
+    "vmax_ret": "直近20日で出来高最大の日の騰落", "vmax_days": "直近20日で出来高最大の日からの経過日数",
+    "ret10": "10日騰落",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -943,7 +960,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
