@@ -368,6 +368,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     lg_in = np.log(c / o)
     q["ovn20"] = np.expm1(lg_on.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=20).sum()))
     q["intra20"] = np.expm1(lg_in.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=20).sum()))
+    # 仮説(2026-11-21 16回目)：夜間騰落の短期版（5日累計）。直近の寄り付きの売り込みを捉える（t 終値時点で確定）
+    q["ovn5"] = np.expm1(lg_on.groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=5).sum()))
     # 仮説(2026-11-21 15回目)：市場全体の荒れ具合＝その日の全銘柄の騰落のばらつき（標準偏差）の5日平均
     xd = q.groupby("date")["ret1"].std().sort_index().rolling(5, min_periods=5).mean().rename("xs_disp5")
     q = q.merge(xd, on="date", how="left")
@@ -483,6 +485,7 @@ GRID = {
     # 仮説(2026-11-21 15回目)：夜間・日中の騰落の分解、市場全体の荒れ具合、来期見通しの伸び
     "ovn20":     [("<=", -0.10), ("<=", -0.08), ("<=", -0.04), (">=", 0.05)],
     "intra20":   [("<=", -0.15), ("<=", -0.08), (">=", 0.10)],
+    "ovn5":      [("<=", -0.06), ("<=", -0.04), ("<=", -0.025)],
     "xs_disp5":  [(">=", 0.03), ("<=", 0.018)],
     "fc_growth": [(">=", 0.20), (">=", 0.10), ("<=", -0.10)],
 }
@@ -512,7 +515,7 @@ LABEL = {
     "op_yield": "予想営業利益の利回り(会社予想/時価総額)", "fc_margin": "予想営業利益率(会社予想)", "dn_streak": "終値の連続下落日数",
     "sales_prog": "売上の進捗率-標準進捗(会社予想比)", "vol_exp": "ボラの急拡大(5日/前60日)", "mkt5": "市場全体の5日騰落(中央値)",
     "disc_ret": "決算発表後の株価反応(発表前日比・20日以内)", "us_dd60": "S&P500の60日高値からの下落(前日)", "turn20": "売買の回転率(20日平均売買代金/時価総額)",
-    "ovn20": "夜間(前日終値→始値)の20日累計騰落", "intra20": "日中(始値→終値)の20日累計騰落",
+    "ovn20": "夜間(前日終値→始値)の20日累計騰落", "intra20": "日中(始値→終値)の20日累計騰落", "ovn5": "夜間(前日終値→始値)の5日累計騰落",
     "xs_disp5": "市場全体の騰落のばらつき(5日平均)", "fc_growth": "今期見通しの伸び(会社予想営業利益/前期実績)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
