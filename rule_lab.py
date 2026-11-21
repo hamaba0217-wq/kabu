@@ -188,6 +188,22 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     ds = pd.Series(dates, index=dates)
     gapd = (ds.shift(-1) - ds).dt.days
     ctx["hol_next"] = ((gapd >= 4) | ((ctx.index.dayofweek < 4) & (gapd >= 2))).astype(float).where(gapd.notna())
+    # 仮説(2026-11-22 41回目)：SQ（毎月第2金曜）までの暦日数＝需給の節目、3月・9月末（配当の権利付き最終日）までの暦日数＝
+    # 保有期間中に権利落ちを含むか。どちらも暦で事前に決まっているので先読みではない
+    def _sq(y, mth):
+        d = pd.Timestamp(year=y, month=mth, day=1)
+        return d + pd.Timedelta(days=(4 - d.dayofweek) % 7 + 7)
+    sqd, dvd = [], []
+    for t in ctx.index:
+        nx = _sq(t.year, t.month)
+        if nx < t.normalize():
+            y2, m2 = (t.year + 1, 1) if t.month == 12 else (t.year, t.month + 1)
+            nx = _sq(y2, m2)
+        sqd.append((nx - t.normalize()).days)
+        cands = [pd.Timestamp(year=t.year + k, month=mm, day=1) + pd.offsets.MonthEnd(0) for k in (0, 1) for mm in (3, 9)]
+        dvd.append(min((c_ - t.normalize()).days for c_ in cands if c_ >= t.normalize()))
+    ctx["sq_days"] = sqd
+    ctx["div_days"] = dvd
     ctx.index.name = "date"
     q = q.merge(ctx.reset_index(), on="date", how="left")
     # --- 業種内での相対的な強さ ---
@@ -665,6 +681,9 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["size_sp5"] = _spread("ret5", "mcap")
     q["val_sp20"] = _spread("ret20", "pbr")
     q["ret20_xr"] = q.groupby("date")["ret20"].rank(pct=True)
+    # 仮説(2026-11-22 41回目)：業種全体の52週高値からの位置（業種の中央値）と、銘柄-業種の差＝業種ごと深く下げたのか銘柄だけか
+    q["sec_from_hi"] = q.groupby(["date", "sector"])["from_hi"].transform("median")
+    q["from_hi_rel"] = q["from_hi"] - q["sec_from_hi"]
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -881,6 +900,10 @@ GRID = {
     "size_sp5": [("<=", -0.02), ("<=", -0.01), (">=", 0.01)],
     "val_sp20": [("<=", -0.03), (">=", 0.02), (">=", 0.04)],
     "ret20_xr": [("<=", 0.02), ("<=", 0.05), (">=", 0.95)],
+    "sq_days": [("<=", 4), ("<=", 10), (">=", 20)],
+    "div_days": [("<=", 10), ("<=", 30), (">=", 90)],
+    "sec_from_hi": [("<=", -0.30), ("<=", -0.20), (">=", -0.08)],
+    "from_hi_rel": [("<=", -0.20), ("<=", -0.10), (">=", 0.0)],
 }
 
 LABEL = {
@@ -956,7 +979,8 @@ LABEL = {
     "vmax_ret": "直近20日で出来高最大の日の騰落", "vmax_days": "直近20日で出来高最大の日からの経過日数",
     "ret10": "10日騰落",
     "size_sp5": "小型株-大型株の5日騰落の差(時価総額の下位3割-上位3割)", "val_sp20": "低PBR株-高PBR株の20日騰落の差(下位3割-上位3割)",
-    "ret20_xr": "20日騰落の全銘柄内の順位(0=最も下げた)",
+    "ret20_xr": "20日騰落の全銘柄内の順位(0=最も下げた)", "sq_days": "次のSQ(第2金曜)までの暦日数", "div_days": "3月・9月末(配当の権利)までの暦日数",
+    "sec_from_hi": "業種の52週高値からの位置(中央値)", "from_hi_rel": "52週高値からの位置-業種の中央値",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -978,7 +1002,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
