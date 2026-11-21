@@ -166,6 +166,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x["usdjpy_ret1"] = m["usdjpy"].pct_change(1)                    # 為替感応度の計算用（GRIDには入れない）
         x["vix_rel60"] = m["vix"] / m["vix"].rolling(60, min_periods=40).mean()   # 仮説(18回目)：VIXの60日平均に対する水準
         x["wti_ret5"] = m["wti"].pct_change(5)                             # 仮説(20回目2周目)：原油の短期の急変
+        x["sp500_ret5"] = m["sp500"].pct_change(5)                         # 日本株の相対の弱さの計算用（GRIDには入れない）
         x["vix_chg1"] = m["vix"].diff()                                    # 仮説(20回目)：VIXの1日変化（急騰後の反落＝不安のピークアウト）
         x["spread_chg20"] = (m["us10y"] - m["jgb10y"]) - (m["us10y"] - m["jgb10y"]).shift(20)   # 仮説(19回目)：日米10年金利差の20日変化
         # 日付 t には「t より前の日付」の値を使う
@@ -431,6 +432,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     mk5 = q.groupby("date")["ret5"].median().rename("mkt5")
     q = q.merge(mk5, on="date", how="left")
     q = add_context(q)
+    # 仮説(2026-11-21 20回目4周目)：日本株だけが売られた度合い＝市場全体の5日騰落(中央値) − 米国株(S&P500)の5日騰落(前日)
+    q["jp_rel5"] = q["mkt5"] - q["sp500_ret5"] if "sp500_ret5" in q.columns else np.nan
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -565,6 +568,7 @@ GRID = {
     "wti_ret5":  [(">=", 0.05), ("<=", -0.05)],
     "sec_vratio": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
     "mkt_vratio": [(">=", 1.3), (">=", 1.1), ("<=", 0.8)],
+    "jp_rel5":   [("<=", -0.03), ("<=", -0.015), (">=", 0.02)],
 }
 
 LABEL = {
@@ -602,6 +606,7 @@ LABEL = {
     "vix_chg1": "VIXの1日変化(前日・ポイント)", "sec_crash": "同業種で20日騰落-15%以下の銘柄の割合", "days_hi20": "20日高値からの経過日数",
     "sec_ret1": "業種全体の当日の騰落(中央値)", "wti_ret5": "原油(WTI)の5日騰落(前日)",
     "sec_vratio": "業種全体の出来高倍率(中央値)", "mkt_vratio": "市場全体の出来高倍率(中央値)",
+    "jp_rel5": "日本株の米国株に対する5日騰落の差",
 }
 POINT_FEATS = {"vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
