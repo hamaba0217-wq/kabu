@@ -423,6 +423,13 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["mfg"] = q["sector"].isin(MFG).astype(float).where(q["sector"].notna()) if "sector" in q.columns else np.nan
     # 仮説(2026-11-21 20回目)：20日高値からの経過日数（下げの速さ。少ないほど急な下げ）
     q["days_hi20"] = g["high"].transform(lambda s: s.rolling(20, min_periods=20).apply(lambda a: 19 - np.argmax(a), raw=True))
+    # 仮説(2026-11-21 21回目)：長期の勢い（250日騰落）・直近20日の最大の日次下落（一発の悪材料か、じり安か）・
+    # 上昇日と下落日の出来高の比（20日。売り物の出尽くし／買い集め）。すべて t 終値時点で確定
+    q["ret250"] = c / g["close"].shift(250) - 1
+    q["min1_20"] = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(20, min_periods=15).min())
+    vu = v.where(q["ret1"] > 0, 0.0).groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=15).sum())
+    vd = v.where(q["ret1"] < 0, 0.0).groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=15).sum())
+    q["ud_vol20"] = vu / vd.replace(0, np.nan)
     plo = g["low"].transform(lambda s: s.shift(1).rolling(250, min_periods=120).min())
     q["new_lo"] = (c < plo).astype(float).where(plo.notna())
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
@@ -569,6 +576,10 @@ GRID = {
     "sec_vratio": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
     "mkt_vratio": [(">=", 1.3), (">=", 1.1), ("<=", 0.8)],
     "jp_rel5":   [("<=", -0.03), ("<=", -0.015), (">=", 0.02)],
+    # 仮説(2026-11-21 21回目)：長期の勢い・最大の日次下落・上昇日/下落日の出来高比
+    "ret250":    [(">=", 0.30), (">=", 0.0), ("<=", -0.20)],
+    "min1_20":   [("<=", -0.10), ("<=", -0.06), (">=", -0.025)],
+    "ud_vol20":  [(">=", 1.5), ("<=", 0.6), ("<=", 0.4)],
 }
 
 LABEL = {
@@ -607,6 +618,7 @@ LABEL = {
     "sec_ret1": "業種全体の当日の騰落(中央値)", "wti_ret5": "原油(WTI)の5日騰落(前日)",
     "sec_vratio": "業種全体の出来高倍率(中央値)", "mkt_vratio": "市場全体の出来高倍率(中央値)",
     "jp_rel5": "日本株の米国株に対する5日騰落の差",
+    "ret250": "250日騰落(長期の勢い)", "min1_20": "直近20日の最大の日次下落率", "ud_vol20": "上昇日/下落日の出来高比(20日)",
 }
 POINT_FEATS = {"vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
