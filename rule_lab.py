@@ -503,6 +503,12 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     atlo = (q["low"] <= q["lo60"]).astype(float).where(q["lo60"].notna())
     q = q.merge(atlo.groupby(q["date"]).mean().rename("mkt_lo60_frac"), on="date", how="left")
     q["sec_rel5"] = q["sec5"] - q["mkt5"] if "sec5" in q.columns else np.nan
+    # 仮説(2026-11-22 27回目)：日本の市場全体の60日高値からの下落（全銘柄の前日比の中央値を積み上げた指数）・
+    # 業種内での20日騰落の順位（0=業種で最も下げた銘柄）・直近5日で下ヒゲ≥2%をつけた日数（下値での買い支え）。t 終値時点で確定
+    mix = (1 + md1.fillna(0)).cumprod()
+    q = q.merge((mix / mix.rolling(60, min_periods=40).max() - 1).rename("mkt_dd60"), on="date", how="left")
+    q["sec_rank20"] = q.groupby(["date", "sector"])["ret20"].rank(pct=True) if "sector" in q.columns else np.nan
+    q["hammer5"] = (q["shadow_lo"] >= 0.02).astype(float).where(q["shadow_lo"].notna()).groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=5).sum())
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -670,6 +676,10 @@ GRID = {
     "mkt_dn_streak": [(">=", 4), (">=", 2), ("<=", 0)],
     "mkt_lo60_frac": [(">=", 0.2), (">=", 0.1), ("<=", 0.03)],
     "sec_rel5":  [("<=", -0.05), ("<=", -0.02), (">=", 0.03)],
+    # 仮説(2026-11-22 27回目)：日本の市場全体の60日高値からの下落・業種内の20日騰落の順位・直近5日の下ヒゲの日数
+    "mkt_dd60":  [("<=", -0.10), ("<=", -0.05), (">=", -0.01)],
+    "sec_rank20": [("<=", 0.1), ("<=", 0.25), (">=", 0.75)],
+    "hammer5":   [(">=", 3), (">=", 2), ("<=", 0)],
 }
 
 LABEL = {
@@ -721,6 +731,8 @@ LABEL = {
     "lo_days60": "60日安値からの経過日数",
     "mkt_dn_streak": "市場全体の連続下落日数(前日比の中央値)", "mkt_lo60_frac": "60日安値をつけた銘柄の割合(市場全体)",
     "sec_rel5": "業種の5日騰落-市場全体の5日騰落",
+    "mkt_dd60": "日本の市場全体の60日高値からの下落(中央値指数)", "sec_rank20": "業種内の20日騰落の順位(0=最も下げた)",
+    "hammer5": "直近5日で下ヒゲ≥2%の日数",
 }
 POINT_FEATS = {"us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
