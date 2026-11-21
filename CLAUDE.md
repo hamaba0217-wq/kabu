@@ -32,5 +32,5 @@
 4. rule_lab.py に実装する：特徴量の計算（add_features / add_context）、`GRID` に条件、`LABEL` に日本語名、必要なら `fmt_cond`。既存の勝ちの定義・採用基準・出力は変えない。
 5. `python smoke_rule_lab.py` を実行し **SMOKE OK** を確認。失敗したら直す。直せなければ変更を取り消す。
 6. rules/research_log.md の先頭に追記：日時、結果の解釈（数値を引用）、追加した仮説と理由、状態「結果待ち」。
-7. コミットして main に push（`git pull --rebase` してから）。main に push できない環境では `claude/research-日付` ブランチに push する（Actions が SMOKE OK を確認して main に取り込む）。
+7. コミットして main に push（`git pull --rebase` してから）。main に push できない環境では `claude/research-日付` ブランチに push し、報告で「main への取り込みが必要」と伝える（自動では取り込まれない）。
 8. 最後に日本語で2〜3行の報告。
