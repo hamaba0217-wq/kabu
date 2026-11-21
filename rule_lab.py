@@ -87,6 +87,92 @@ def load_data(fetch: bool) -> pd.DataFrame:
     return q
 
 
+def _etf(q, codes):
+    """J-Quants 株価に含まれるETFの終値・売買代金（日付→値）"""
+    s = q[q["code"].isin(codes)]
+    if s.empty:
+        return None
+    code = s["code"].value_counts().index[0]
+    s = s[s["code"] == code].set_index("date")
+    tv = s["turnover_value"] if "turnover_value" in s.columns else s["close"] * s["volume"]
+    return pd.DataFrame({"close": s["close"], "tv": tv})
+
+
+def add_context(q: pd.DataFrame) -> pd.DataFrame:
+    """相場全体・投資家心理・外部要因（金/国債/金利/為替/米株/原油/VIX）・季節性・決算タイミング"""
+    dates = pd.DatetimeIndex(sorted(q["date"].unique()))
+    ctx = pd.DataFrame(index=dates)
+    # --- 相場の内部（その日の引けで確定する値） ---
+    up = (q["ret1"] > 0).groupby(q["date"]).sum()
+    dn = (q["ret1"] < 0).groupby(q["date"]).sum()
+    ctx["breadth"] = up / (up + dn)                                   # 値上がり銘柄の割合
+    ctx["adr25"] = up.rolling(25).sum() / dn.rolling(25).sum() * 100  # 騰落レシオ(25日)
+    # --- ETFから見る他の資産・個人投資家の心理 ---
+    for name, codes in {"gold": ["1540", "15400", "1328", "13280"],
+                        "bond": ["2510", "25100"],
+                        "nk": ["1321", "13210"],
+                        "reit": ["1343", "13430"]}.items():
+        e = _etf(q, codes)
+        if e is not None:
+            ctx[f"{name}_ret20"] = e["close"].reindex(dates).pct_change(20)
+    lev, inv = _etf(q, ["1570", "15700"]), _etf(q, ["1357", "13570"])
+    if lev is not None and inv is not None:
+        r = (lev["tv"] / inv["tv"]).reindex(dates)
+        lr = np.log(r.replace(0, np.nan))
+        ctx["lev_z"] = (lr - lr.rolling(60).mean()) / lr.rolling(60).std()  # 強気(レバ)/弱気(インバ)売買代金比の偏り
+    # --- 外部指標（1営業日ずらし＝判定時点で確実に分かっている値だけ使う） ---
+    try:
+        import macro
+        m = macro.load()
+        if m is None or os.environ.get("RULE_LAB_FETCH_MACRO", "1") == "1":
+            m = macro.fetch()
+    except Exception as e:
+        print(f"[警告] 外部指標なし: {e}")
+        m = None
+    if m is not None and len(m):
+        m = m.sort_index().ffill()
+        x = pd.DataFrame(index=m.index)
+        x["vix"] = m["vix"]
+        x["vix_chg5"] = m["vix"] - m["vix"].shift(5)
+        x["us10y_chg20"] = m["us10y"] - m["us10y"].shift(20)
+        x["jgb10y_chg20"] = m["jgb10y"] - m["jgb10y"].shift(20)
+        x["jgb_slope"] = m["jgb10y"] - m["jgb2y"]
+        x["usdjpy_ret20"] = m["usdjpy"].pct_change(20)
+        x["wti_ret20"] = m["wti"].pct_change(20)
+        x["sp500_ret1"] = m["sp500"].pct_change(1)
+        x["sp500_ret20"] = m["sp500"].pct_change(20)
+        x["nasdaq_ret5"] = m["nasdaq"].pct_change(5)
+        # 日付 t には「t より前の日付」の値を使う
+        x.index = x.index + pd.Timedelta(days=1)
+        x = x[~x.index.duplicated(keep="last")]
+        al = x.reindex(x.index.union(dates)).ffill().reindex(dates)
+        ctx = ctx.join(al)
+    ctx["month"] = ctx.index.month
+    ctx["dow"] = ctx.index.dayofweek
+    ctx.index.name = "date"
+    q = q.merge(ctx.reset_index(), on="date", how="left")
+    # --- 業種内での相対的な強さ ---
+    sec = q.groupby(["date", "sector"])["ret20"].transform("median")
+    q["rel_sec20"] = q["ret20"] - sec
+    # --- 決算発表からの日数（発表日当日を含む過去の発表のみ） ---
+    try:
+        import cache
+        f = cache.load("fin")
+        if f is not None and "disclosed_date" in f.columns:
+            f = f[["code", "disclosed_date"]].dropna().copy()
+            f["code"] = f["code"].astype(str)
+            f["disclosed_date"] = pd.to_datetime(f["disclosed_date"])
+            f = f.drop_duplicates().sort_values("disclosed_date")
+            q = q.sort_values("date")
+            q = pd.merge_asof(q, f.rename(columns={"disclosed_date": "last_disc"}),
+                              left_on="date", right_on="last_disc", by="code", direction="backward")
+            q["since_disc"] = (q["date"] - q["last_disc"]).dt.days
+            q = q.drop(columns=["last_disc"])
+    except Exception as e:
+        print(f"[警告] 決算日データなし: {e}")
+    return q.sort_values(["code", "date"]).reset_index(drop=True)
+
+
 def add_features(q: pd.DataFrame) -> pd.DataFrame:
     g = q.groupby("code", sort=False)
     c, h, l, o, v = q["close"], q["high"], q["low"], q["open"], q["volume"]
@@ -118,6 +204,9 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
+    q = add_context(q)
+    cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
+    q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
     g = q.groupby("code", sort=False)
     q["buy"] = g["open"].shift(-1)
@@ -155,6 +244,31 @@ GRID = {
     "body":      [(">=", 0.03), ("<=", -0.03)],
     "mkt20":     [(">=", 0.0), ("<=", 0.0), (">=", 0.03)],
     "close":     [("<=", 1000), (">=", 3000)],
+    # 相場全体・投資家心理
+    "breadth":   [(">=", 0.6), ("<=", 0.3)],
+    "adr25":     [(">=", 120), ("<=", 80), ("<=", 70)],
+    "lev_z":     [(">=", 1), ("<=", -1)],
+    "rel_sec20": [(">=", 0.05), (">=", 0.10), ("<=", -0.05)],
+    # 他の資産（金・国債・REIT）
+    "gold_ret20": [(">=", 0.03), ("<=", -0.03)],
+    "bond_ret20": [(">=", 0.005), ("<=", -0.005)],
+    "reit_ret20": [(">=", 0.03), ("<=", -0.03)],
+    "nk_ret20":  [(">=", 0.05), ("<=", -0.05)],
+    # 金利・為替・海外
+    "vix":       [(">=", 25), ("<=", 15), (">=", 20)],
+    "vix_chg5":  [(">=", 3), ("<=", -3)],
+    "us10y_chg20": [(">=", 0.2), ("<=", -0.2)],
+    "jgb10y_chg20": [(">=", 0.1), ("<=", -0.1)],
+    "jgb_slope": [(">=", 1.0), ("<=", 0.5)],
+    "usdjpy_ret20": [(">=", 0.02), ("<=", -0.02)],
+    "wti_ret20": [(">=", 0.08), ("<=", -0.08)],
+    "sp500_ret1": [(">=", 0.01), ("<=", -0.01), ("<=", -0.02)],
+    "sp500_ret20": [(">=", 0.03), ("<=", -0.03)],
+    "nasdaq_ret5": [(">=", 0.03), ("<=", -0.03)],
+    # 季節性・決算タイミング
+    "month":     [("==", m) for m in range(1, 13)],
+    "dow":       [("==", d) for d in range(5)],
+    "since_disc": [("<=", 3), ("<=", 10), (">=", 60)],
 }
 
 LABEL = {
@@ -164,7 +278,17 @@ LABEL = {
     "tv20": "20日平均売買代金", "vratio": "出来高倍率(20日平均比)", "rsi14": "RSI14",
     "clpos": "当日レンジ内の終値位置", "gap": "当日の窓", "body": "当日の陽線/陰線幅",
     "mkt20": "市場全体の20日騰落(中央値)", "close": "株価",
+    "breadth": "値上がり銘柄の割合", "adr25": "騰落レシオ(25日)",
+    "lev_z": "個人の強気度(レバETF/インバETF売買代金の偏差)", "rel_sec20": "業種平均に対する20日騰落の差",
+    "gold_ret20": "金(ETF)の20日騰落", "bond_ret20": "国債ETFの20日騰落", "reit_ret20": "REIT(ETF)の20日騰落",
+    "nk_ret20": "日経225(ETF)の20日騰落", "vix": "VIX恐怖指数(前日)", "vix_chg5": "VIXの5日変化(ポイント)",
+    "us10y_chg20": "米10年金利の20日変化(%pt)", "jgb10y_chg20": "日本10年国債金利の20日変化(%pt)",
+    "jgb_slope": "日本国債 10年-2年金利差(%pt)", "usdjpy_ret20": "ドル円の20日変化",
+    "wti_ret20": "原油(WTI)の20日騰落", "sp500_ret1": "前夜のS&P500", "sp500_ret20": "S&P500の20日騰落",
+    "nasdaq_ret5": "NASDAQの5日騰落", "month": "月", "dow": "曜日", "since_disc": "直近の決算発表からの日数",
 }
+POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
+DOW = "月火水木金"
 
 
 def fmt_cond(f, op, th):
@@ -175,6 +299,16 @@ def fmt_cond(f, op, th):
         return f"{lab} {op} {th/1e8:g}億円"
     if f in ("close",):
         return f"{lab} {op} {th:g}円"
+    if f == "month":
+        return f"{int(th)}月"
+    if f == "dow":
+        return f"{DOW[int(th)]}曜日"
+    if f == "since_disc":
+        return f"{lab} {op} {th:g}日"
+    if f == "breadth":
+        return f"{lab} {op} {th*100:g}%"
+    if f in POINT_FEATS:
+        return f"{lab} {op} {th:g}"
     if f in ("vratio", "rsi14", "clpos"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
@@ -187,8 +321,16 @@ def rule_key(conds):
 
 def apply(q, conds):
     m = pd.Series(True, index=q.index)
+    m &= ~q["etf"]
     for f, op, th in BASE + conds:
-        m &= (q[f] >= th) if op == ">=" else (q[f] <= th)
+        if f not in q.columns:
+            return m & False
+        if op == ">=":
+            m &= q[f] >= th
+        elif op == "<=":
+            m &= q[f] <= th
+        else:
+            m &= q[f] == th
     return m
 
 
