@@ -242,6 +242,19 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             q["op_yield"] = (q["fc_op_now"] / q["mcap"].replace(0, np.nan)).where(~old)
             q["fc_margin"] = (q["fc_op_now"] / q["fc_ns"].where(q["fc_ns"] > 0)).where(~old)
             q = q.drop(columns=["d_fz", "fc_op_now", "fc_ns"])
+            # 仮説(2026-11-21 13回目)：売上の進捗率の上振れ＝累計売上/会社予想の売上 − 標準進捗（利益より振れが小さい）
+            gs = cache.load("fin")
+            if {"net_sales", "fc_net_sales"} <= set(gs.columns):
+                gs = gs[["code", "disclosed_date", "period_type", "net_sales", "fc_net_sales"]].copy()
+                gs["code"] = gs["code"].astype(str)
+                gs["disclosed_date"] = pd.to_datetime(gs["disclosed_date"])
+                exs = gs["period_type"].map({"1Q": 0.25, "2Q": 0.5, "3Q": 0.75})
+                gs["sales_prog"] = np.where(gs["fc_net_sales"] > 0, gs["net_sales"] / gs["fc_net_sales"] - exs, np.nan)
+                sp = gs.dropna(subset=["sales_prog"])[["code", "disclosed_date", "sales_prog"]]                     .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date")
+                q = pd.merge_asof(q.sort_values("date"), sp.rename(columns={"disclosed_date": "d_sp"}),
+                                  left_on="date", right_on="d_sp", by="code", direction="backward")
+                q.loc[(q["date"] - q["d_sp"]).dt.days > 100, "sales_prog"] = np.nan
+                q = q.drop(columns=["d_sp"])
     except Exception as e:
         print(f"[警告] PBR・予想修正なし: {e}")
     # 仮説(2026-11-21 7回目)：業種ローテーション＝業種全体の20日騰落（中央値）
@@ -329,9 +342,16 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     dnb = (q["ret1"] < 0).astype(int)
     grp2 = (dnb == 0).groupby(q["code"]).cumsum()
     q["dn_streak"] = dnb.groupby([q["code"], grp2]).cumsum().astype(float)
+    # 仮説(2026-11-21 13回目)：ボラの急拡大＝直近5日の日次ボラ/前60日の日次ボラ（t 終値時点で確定）
+    sd5 = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(5, min_periods=5).std())
+    sd60 = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.shift(5).rolling(60, min_periods=40).std())
+    q["vol_exp"] = sd5 / sd60.replace(0, np.nan)
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
     q = q.merge(mk, on="date", how="left")
+    # 仮説(2026-11-21 13回目)：相場全体の短期の急落（全銘柄の5日騰落の中央値）
+    mk5 = q.groupby("date")["ret5"].median().rename("mkt5")
+    q = q.merge(mk5, on="date", how="left")
     q = add_context(q)
     cnum = pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
@@ -429,6 +449,9 @@ GRID = {
     "op_yield":  [(">=", 0.10), (">=", 0.15), ("<=", 0.03)],
     "fc_margin": [(">=", 0.10), (">=", 0.15), ("<=", 0.03)],
     "dn_streak": [(">=", 4), (">=", 6)],
+    "sales_prog": [(">=", 0.05), (">=", -0.02), ("<=", -0.05)],
+    "vol_exp":   [(">=", 2.0), ("<=", 0.6)],
+    "mkt5":      [("<=", -0.02), (">=", 0.02)],
 }
 
 LABEL = {
@@ -454,6 +477,7 @@ LABEL = {
     "hol_next": "連休前(次の営業日まで休日を挟む)", "beta60": "市場に対する60日ベータ", "fx_corr60": "円安との60日相関(為替感応度)",
     "down_frac20": "直近20日の下落日の割合", "sec_disp20": "業種内の20日騰落のばらつき", "sec_turn": "業種の20日騰落の変化(20日前比)",
     "op_yield": "予想営業利益の利回り(会社予想/時価総額)", "fc_margin": "予想営業利益率(会社予想)", "dn_streak": "終値の連続下落日数",
+    "sales_prog": "売上の進捗率-標準進捗(会社予想比)", "vol_exp": "ボラの急拡大(5日/前60日)", "mkt5": "市場全体の5日騰落(中央値)",
 }
 POINT_FEATS = {"vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -481,7 +505,7 @@ def fmt_cond(f, op, th):
         return f"{lab} {op} {th*100:g}%"
     if f in POINT_FEATS:
         return f"{lab} {op} {th:g}"
-    if f in ("vratio", "rsi14", "clpos", "vdry", "pbr"):
+    if f in ("vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
