@@ -1941,6 +1941,32 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
         for v in _shift_variants(f, op, th):
             cs = conds[:i] + [[f, op, v]] + conds[i + 1:]
             md.append(row(f"{fmt_cond(f, op, th)} → {fmt_cond(f, op, v)}", evaluate(q, cs, edges)))
+    # 担当2：閾値を緩めると勝率が大きく下がる場合、増えた取引がどの信号日から来たか（相場全体の値の条件は日付ごとに丸ごと出入りする）
+    try:
+        kt2 = set(zip(t["code"].astype(str), t["date"].dt.strftime("%Y-%m-%d")))
+        cliff = []
+        for i, (f, op, th) in enumerate(conds):
+            for v in _shift_variants(f, op, th):
+                t2 = dedup_trades(q, apply(q, conds[:i] + [[f, op, v]] + conds[i + 1:]))
+                if len(t2) <= len(t):
+                    continue
+                d2 = pd.to_datetime(t2["date"]).dt.strftime("%Y-%m-%d")
+                extra = t2[[k not in kt2 for k in zip(t2["code"].astype(str), d2)]]
+                if len(extra) >= 5 and extra["win"].mean() < t["win"].mean() - 0.1:
+                    cliff.append((f"{fmt_cond(f, op, th)} → {fmt_cond(f, op, v)}", extra))
+        md += ["", "## 閾値を緩めたときに増える取引の中身（増えた取引の勝率が採用ルールより10pt以上低いもの）", "",
+               "増えた取引が少数の信号日に集中していれば、閾値はその日を外すために選ばれた形（偶然の疑い）。"
+               "多くの日に散らばっていれば、閾値に意味がある可能性が高い。同じ局面の数日前の日が増える場合は、買う時機が早すぎることを表す。", ""]
+        if not cliff:
+            md.append("- 該当なし（どの条件も、緩めて増える取引の勝率は採用ルールとの差10pt以内）")
+        for lbl, ex in cliff:
+            g = ex.groupby(pd.to_datetime(ex["date"]).dt.strftime("%Y-%m-%d")).agg(
+                n=("win", "size"), win=("win", "mean"), pnl=("pnl", "mean")).sort_values("n", ascending=False)
+            md.append(f"- {lbl}：増えた取引 {len(ex)} 件・勝率 {pct(ex['win'].mean())}・平均損益 {pct(ex['pnl'].mean(), 2)}・"
+                      f"信号日 {len(g)} 日（最多の日に {g['n'].iloc[0] / len(ex) * 100:.0f}%）："
+                      + "、".join(f"{d} {int(r['n'])}件 {pct(r['win'])}" for d, r in g.head(6).iterrows()))
+    except Exception as e:  # 情報用
+        md += ["", f"（閾値を緩めたときの中身の点検は失敗：{e}）"]
     # 条件を減らした簡単な版：外しても勝率が最も下がらない条件から順に1つずつ外していく（どの条件が勝率を支えているか）
     def weeks(cs):
         tt = dedup_trades(q, apply(q, cs))
