@@ -951,6 +951,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q = q.merge(q.groupby("date")["ret1"].median().rename("mkt_ret1"), on="date", how="left")
     # 仮説(2026-11-22 43回目)：業種内の2日RSIの中央値（業種ぐるみの短期の売られすぎ）。t 終値時点で確定
     q["sec_rsi2"] = q.groupby(["date", "sector"])["rsi2"].transform("median")
+    q = _shrink(q)   # 担当3 38周目：途中でも float32 に縮め、add_features の後半のメモリのピークを下げる（Actions の 16GB 対策。最後の _shrink と同じ処理）
     # 仮説(2026-11-22 44回目)：業種の連続下落日数（業種の前日比の中央値がマイナスの日の連続）・当日の騰落を20日ボラで割った値
     # （その日のショックの大きさ）・業種内で60日安値をつけた銘柄の割合（業種ぐるみの投げ売り）。すべて t 終値時点で確定
     if "sector" in q.columns and "sec_ret1" in q.columns:
@@ -1106,6 +1107,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["mkt_corr_avg"] = q.groupby("date")["mkt_corr20"].transform("mean")
     else:
         q["mkt_corr20"] = q["mkt_corr_chg"] = q["mkt_corr_avg"] = np.nan
+    q = _shrink(q)   # 担当3 38周目：途中でも float32 に縮め、add_features の後半のメモリのピークを下げる（Actions の 16GB 対策。最後の _shrink と同じ処理）
     # 仮説(2026-11-22 53回目 担当1)：季節性・投資家心理
     #  disc_season 市場全体で直近10日以内に決算を発表した銘柄の割合（決算シーズンの最中か）
     #  mkt_disc_ret 直近10日以内に発表した銘柄の決算反応(disc_ret)の中央値（その決算シーズンの地合い。20銘柄以上の日のみ）
@@ -1268,6 +1270,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     _me = _ud + pd.offsets.MonthEnd(0)
     _bl = np.busday_count((_ud + pd.Timedelta(days=1)).values.astype("datetime64[D]"), (_me + pd.Timedelta(days=1)).values.astype("datetime64[D]"))
     q["bd_left"] = q["date"].map(pd.Series(_bl.astype(float), index=_ud.values))
+    q = _shrink(q)   # 担当3 38周目：途中でも float32 に縮め、add_features の後半のメモリのピークを下げる（Actions の 16GB 対策。最後の _shrink と同じ処理）
     # 仮説(2026-11-22 担当1 30周目)：上値の売り圧力（価格帯別の売買代金）と、上に残った窓（窓埋めの目標）
     # ovh10：直近60日の売買代金のうち、その日の平均価格((高+安+終)/3)が t 終値〜+10% の範囲だった割合
     #        （+10%までの間で買って含み損を抱えた人＝戻り売りの多さ。少ないほど+10%に届きやすい仮説）
