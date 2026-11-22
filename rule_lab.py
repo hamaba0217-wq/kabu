@@ -1714,6 +1714,45 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
         tt_ = dedup_trades(q, apply(q, cs_) & pd.to_datetime(q["date"]).dt.normalize().isin(sd_))
         if len(tt_):
             md.append(f"| {lbl_} | {len(tt_)} | {pct(tt_['win'].mean())} | {pct(tt_['pnl'].mean(), 2)} |")
+    # 仮説(担当2 27周目)：同じ日の取引はまとめて勝ち負けする（独立ではない）。信号日を単位にしたブートストラップと
+    # 1日ずつ外したとき（ジャックナイフ）で、取引数から見た見かけより不確かさが大きくないかを見る（情報用）
+    dd_ = t["date"].dt.normalize()
+    gd_ = t.groupby(dd_).agg(n=("win", "size"), w=("win", "sum"), p=("pnl", "sum"))
+    md += ["", "## 信号日を単位にした不確かさ（同じ日の取引はまとめて当たり外れする）", ""]
+    if len(gd_) >= 3:
+        rng_ = np.random.default_rng(0)
+        nn_, ww_, pp_ = gd_["n"].to_numpy(float), gd_["w"].to_numpy(float), gd_["p"].to_numpy(float)
+        bs_w, bs_p = [], []
+        for _ in range(2000):
+            ix_ = rng_.integers(0, len(gd_), len(gd_))
+            bs_w.append(ww_[ix_].sum() / nn_[ix_].sum())
+            bs_p.append(pp_[ix_].sum() / nn_[ix_].sum())
+        jk_ = [(ww_.sum() - ww_[k]) / (nn_.sum() - nn_[k]) for k in range(len(gd_)) if nn_.sum() > nn_[k]]
+        wr_ = float(t["win"].mean())
+        se_iid = (wr_ * (1 - wr_) / len(t)) ** 0.5
+        md += [f"- 信号日 {len(gd_)} 日・取引 {len(t)} 件。1日あたり最大 {int(nn_.max())} 件（全体の {nn_.max()/nn_.sum()*100:.0f}%）",
+               f"- 取引を独立とみなした場合の勝率の95%範囲：{pct(max(0.0, wr_ - 1.96 * se_iid))}〜{pct(min(1.0, wr_ + 1.96 * se_iid))}",
+               f"- **信号日を単位にしたブートストラップ（2000回）の勝率**：5%点 {pct(float(np.percentile(bs_w, 5)))}・"
+               f"2.5%点 {pct(float(np.percentile(bs_w, 2.5)))}・中央 {pct(float(np.median(bs_w)))}",
+               f"- 同 平均損益：5%点 {pct(float(np.percentile(bs_p, 5)), 2)}・中央 {pct(float(np.median(bs_p)), 2)}",
+               f"- 1日ずつ外したとき（ジャックナイフ）の勝率：最低 {pct(min(jk_)) if jk_ else '-'}・最高 {pct(max(jk_)) if jk_ else '-'}",
+               f"- 信号日を等しく数えた勝率 {pct(float((ww_ / nn_).mean()))}・勝率が8割未満の日 {int(((ww_ / nn_) < 0.8).sum())} 日"]
+        ep_ = (pd.Series(gd_.index).diff().dt.days > 30).cumsum().to_numpy()   # 信号日の間が30日より空いたら別の局面
+        if ep_.max() >= 2:
+            ge_ = pd.DataFrame({"e": ep_, "n": nn_, "w": ww_}).groupby("e").sum()
+            en_, ew_ = ge_["n"].to_numpy(float), ge_["w"].to_numpy(float)
+            bs_e = []
+            for _ in range(2000):
+                ix_ = rng_.integers(0, len(ge_), len(ge_))
+                bs_e.append(ew_[ix_].sum() / en_[ix_].sum())
+            md.append(f"- **局面（{len(ge_)}回）を単位にしたブートストラップの勝率**：5%点 {pct(float(np.percentile(bs_e, 5)))}・"
+                      f"中央 {pct(float(np.median(bs_e)))}（局面が少ないほど幅は広い）")
+        md += ["",
+               "| 信号日 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
+        for d_, r_ in gd_.sort_values("n", ascending=False).head(25).iterrows():
+            md.append(f"| {d_:%Y-%m-%d} | {int(r_['n'])} | {pct(r_['w'] / r_['n'])} | {pct(r_['p'] / r_['n'], 2)} |")
+    else:
+        md.append("- 信号日が3日未満のため計算しない")
     # 相場の状態別：市場全体の下げの長さ・深さで分けた成績（長い下げ相場でも効くか）
     md += ["", "## 相場の状態別（市場全体の下げの長さ・深さ）", "", "| 区分 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
     for f_, cuts, unit in (("mkt_hi_days", [-1, 10, 30, 60, 1e9], "日"), ("mkt_dd120", [-1, -0.2, -0.1, -0.05, 1], ""),
