@@ -1733,6 +1733,21 @@ def robustness_report(q, conds, edges, base, path=None):
         md += ["", f"## seeds の局面集中（取引30件以上の {len(srows)} 個、勝率の高い順）", "",
                "| 勝率 | 取引数 | 平均損益 | 週数 | 上位3週の割合 | 局面の数 | 条件 |", "|---|---|---|---|---|---|---|"]
         md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {lbl} |" for w, n, p, wkn, t3, e, lbl in srows]
+    # 担当2が検証中の条件について、seeds からその条件を外した版との差（その条件の上乗せが5年分でもあるか）
+    CHECK = ("disc_share", "mkt_us_corr20", "mkt_us_corr_chg", "mkt_corr_chg", "stop_lo5", "mkt_stop_lo", "xsec_disp_rel60")
+    crow = []
+    for s in seeds:
+        cs = [list(c) for c in s.get("conds", [])]
+        for j, cnd in enumerate(cs):
+            if cnd[0] in CHECK and len(cs) > 1:
+                rw, ro = evaluate(q, cs, edges), evaluate(q, cs[:j] + cs[j + 1:], edges)
+                if rw.get("n") and ro.get("n"):
+                    crow.append(f"| {fmt_cond(*cnd)} | {pct(ro['win'])} (n={ro['n']}) | {pct(rw['win'])} (n={rw['n']}) | "
+                                f"{(rw['win'] - ro['win']) * 100:+.1f}pt | {min(x['win'] or 0 for x in ro['splits'])*100:.0f}% → "
+                                f"{min(x['win'] or 0 for x in rw['splits'])*100:.0f}% | {' かつ '.join(fmt_cond(*c) for c in cs[:j] + cs[j + 1:])} |")
+    if crow:
+        md += ["", "## 検証中の条件の上乗せ（seeds からその条件を外した版との比較）", "",
+               "| 条件 | 外した版の勝率 | 足した版の勝率 | 差 | 最悪期間の勝率 | 元の条件 |", "|---|---|---|---|---|---|"] + crow
     _write_keep_manual(path, md)
 
 
