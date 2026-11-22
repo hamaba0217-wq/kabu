@@ -2444,6 +2444,36 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
                     md.append(f"| {lbl} | {pd.Timestamp(r['date']).date()} | {r['code']} | {int(r['win'])} | {pct(r['pnl'], 2)} |")
     except Exception as e:  # 情報用の出力なので失敗しても本体は止めない
         md += ["", f"（取引の入れ替わりの点検は失敗：{e}）"]
+    # 担当2 71周目：条件の効き目を「買う日の選別」と「同じ日の中での銘柄選び」に分ける（情報用）
+    try:
+        md += ["", "## 同じ日の中での条件の効き（買う日の選別か、銘柄選びか。情報用）", "",
+               "その条件を外した版の取引を、条件を満たす／満たさないに分け、同じ信号日の中で勝率を比べる"
+               "（日ごとの差を、その日の少ない側の件数で重みづけ）。全体の差が大きく同日の差が小さい条件は、"
+               "主に「良い日を選ぶ」役で、独立した局面の数を減らしている。相場全体の値の条件は同じ日に差が出ないため「-」。", "",
+               "| 条件 | 外した版の取引 | 満たす取引の勝率 | 満たさない取引の勝率 | 全体の差 | 同じ日の中の差 | 比べた日数 | 上回った日の割合 |",
+               "|---|---|---|---|---|---|---|---|"]
+        for i, (f, op, th) in enumerate(conds):
+            t2 = dedup_trades(q, apply(q, conds[:i] + conds[i + 1:]))
+            if t2.empty:
+                continue
+            v = q.loc[t2.index, f]
+            inn = (v >= th) if op == ">=" else (v <= th) if op == "<=" else (v == th)
+            t2 = t2.assign(inn=inn.values)
+            a_, b_ = t2[t2["inn"]], t2[~t2["inn"]]
+            g_ = t2.groupby(["date", "inn"])["win"].agg(["size", "mean"]).unstack()
+            g_ = g_.dropna() if all((k_, b2) in g_.columns for k_ in ("size", "mean") for b2 in (True, False)) else g_.iloc[0:0]
+            if len(g_):
+                w_ = np.minimum(g_[("size", True)], g_[("size", False)])
+                d_ = g_[("mean", True)] - g_[("mean", False)]
+                sd_, up_ = f"{float((d_ * w_).sum() / w_.sum()) * 100:+.1f}pt", f"{float((d_ > 0).mean()) * 100:.0f}%"
+            else:
+                sd_, up_ = "-", "-"
+            md.append(f"| {fmt_cond(f, op, th)} | {len(t2)} | {pct(a_['win'].mean()) if len(a_) else '-'} | "
+                      f"{pct(b_['win'].mean()) if len(b_) else '-'} | "
+                      f"{(format((a_['win'].mean() - b_['win'].mean()) * 100, '+.1f') + 'pt') if len(a_) and len(b_) else '-'} | "
+                      f"{sd_} | {len(g_)} | {up_} |")
+    except Exception as e:  # 情報用の出力なので失敗しても本体は止めない
+        md += ["", f"（同じ日の中での条件の効きの点検は失敗：{e}）"]
     md += ["", "## 閾値を少しずらしたとき（崖のように急に悪化するなら偶然の疑い）", "",
            "| 条件 → ずらした値 | 取引数 | 勝率 | 平均損益 | 各期間(取引数:勝率) |", "|---|---|---|---|---|"]
     for i, (f, op, th) in enumerate(conds):
@@ -2611,7 +2641,7 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
         md += ["", f"（速報の期間を除いた成績の集計は失敗：{e}）"]
     # 担当2が検証中の条件について、seeds からその条件を外した版との差（その条件の上乗せが5年分でもあるか）
     CHECK = ("disc_share", "mkt_us_corr20", "mkt_us_corr_chg", "mkt_corr_chg", "stop_lo5", "mkt_stop_lo", "xsec_disp_rel60", "xsec_disp_pk10", "xsec_disp_d4",
-             "sec_cap_pk5", "mkt_rate_corr60", "mkt_rate_corr_chg", "mkt_fx_corr_chg", "mg_ratio", "mg_long_chg4", "nk_beta")   # 担当2 48周目：担当1の業種の投げ売り・担当2の金利相関
+             "sec_cap_pk5", "mkt_rate_corr60", "mkt_rate_corr_chg", "mkt_fx_corr_chg", "mg_ratio", "mg_long_chg4", "nk_beta", "ovn20")   # 担当2 48周目：担当1の業種の投げ売り・担当2の金利相関
     crow = []
     for s in seeds:
         cs = [list(c) for c in s.get("conds", [])]
