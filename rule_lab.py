@@ -752,6 +752,16 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["sec_vol_exp"] = q.groupby(["date", "sector"])["vol_exp"].transform("median")
     else:
         q["mfg_sp20"] = q["xsec_disp20"] = q["sec_vol_exp"] = np.nan
+    # 仮説(2026-11-22 48回目)：陽の包み足（前日陰線を当日陽線が包む＝売りの一巡）・安値の連続切り下げ日数・
+    # 直下の価格の節目（100円・1000円などの区切り）からの距離（節目が下値の支えになるか）。すべて t 終値時点で確定
+    _g = q.groupby("code", sort=False)
+    _po, _pc, _pl = _g["open"].shift(1), _g["close"].shift(1), _g["low"].shift(1)
+    q["engulf"] = ((_pc < _po) & (q["close"] > q["open"]) & (q["close"] >= _po) & (q["open"] <= _pc)).astype(float)
+    q.loc[_pc.isna(), "engulf"] = np.nan
+    _ll = (q["low"] < _pl).astype(int)
+    q["ll_streak"] = _ll.groupby([q["code"], (_ll == 0).groupby(q["code"]).cumsum()]).cumsum()
+    _unit = 10 ** np.floor(np.log10(q["close"].where(q["close"] > 0)))
+    q["rnd_up"] = q["close"] / (np.floor(q["close"] / _unit) * _unit) - 1
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -992,6 +1002,9 @@ GRID = {
     "mfg_sp20": [("<=", -0.03), ("<=", -0.01), (">=", 0.02)],
     "xsec_disp20": [(">=", 0.06), (">=", 0.04), ("<=", 0.025)],
     "sec_vol_exp": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
+    "engulf": [(">=", 1)],
+    "ll_streak": [(">=", 5), (">=", 3), ("<=", 0)],
+    "rnd_up": [("<=", 0.02), ("<=", 0.05), (">=", 0.5)],
 }
 
 LABEL = {
@@ -1077,6 +1090,7 @@ LABEL = {
     "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
     "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)",
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
+    "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1084,7 +1098,7 @@ DOW = "月火水木金"
 
 def fmt_cond(f, op, th):
     lab = LABEL.get(f, f)
-    if f in ("ma_up", "new_hi", "gc5", "hol_next"):
+    if f in ("ma_up", "new_hi", "gc5", "hol_next", "engulf"):
         return lab
     if f in ("up_streak", "dn_streak"):
         return f"{lab} {op} {th:g}日"
@@ -1098,7 +1112,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
