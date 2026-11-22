@@ -765,6 +765,15 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["ll_streak"] = _ll.groupby([q["code"], (_ll == 0).groupby(q["code"]).cumsum()]).cumsum()
     _unit = 10 ** np.floor(np.log10(q["close"].where(q["close"] > 0)))
     q["rnd_up"] = q["close"] / (np.floor(q["close"] / _unit) * _unit) - 1
+    # 仮説(2026-11-22 49回目)：業種内の大型株（時価総額上位3割）の5日騰落の中央値-業種全体の中央値（業種のリーダーが先に戻っているか）・
+    # 2度目の急落か（t-60〜t-21 の間に20日騰落-15%以下の日があったか）。どちらも t 終値時点で確定
+    if "sec_mcap_rank" in q.columns and "sector" in q.columns and q["sec_mcap_rank"].notna().any():
+        _big5 = q["ret5"].where(q["sec_mcap_rank"] >= 0.7).groupby([q["date"], q["sector"]]).transform("median")
+        q["sec_lead5"] = _big5 - q.groupby(["date", "sector"])["ret5"].transform("median")
+    else:
+        q["sec_lead5"] = np.nan
+    _cr = (q["ret20"] <= -0.15).astype(float).where(q["ret20"].notna())
+    q["prior_crash"] = _cr.groupby(q["code"], sort=False).transform(lambda s: s.shift(20).rolling(40, min_periods=20).max())
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -1008,6 +1017,8 @@ GRID = {
     "engulf": [(">=", 1)],
     "ll_streak": [(">=", 5), (">=", 3), ("<=", 0)],
     "rnd_up": [("<=", 0.02), ("<=", 0.05), (">=", 0.5)],
+    "sec_lead5": [(">=", 0.02), (">=", 0.0), ("<=", -0.02)],
+    "prior_crash": [(">=", 1), ("<=", 0)],
 }
 
 LABEL = {
@@ -1094,6 +1105,7 @@ LABEL = {
     "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)",
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
+    "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1129,7 +1141,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
