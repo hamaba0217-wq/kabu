@@ -1674,6 +1674,15 @@ def robustness_report(q, conds, edges, base, path=None):
         _, bw, _ = sim(bt, hold=hold_, tp=tp_)
         md.append(f"| +{tp_*100:.0f}% | {hold_}日 | {n_} | {pct(w_)} | {pct(p_, 2)} | {pct(bw)} | "
                   f"{(w_ - bw) * 100:+.1f}pt |" if w_ is not None and bw is not None else f"| +{tp_*100:.0f}% | {hold_}日 | {n_} | - | - | - | - |")
+    # 日付の効果と銘柄選びの効果：信号が出た日と同じ日に、条件を減らして買った場合（その日に買うこと自体の勝率）
+    sd_ = set(pd.to_datetime(t["date"]).dt.normalize())
+    md += ["", "## 信号が出た日と同じ日に買った場合（日付の効果と銘柄選びの効果の分離）", "",
+           "| 同じ日に買う対象 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
+    for lbl_, cs_ in (("流動性条件のみ（全銘柄）", []), ("20日騰落 <= -12% のみ", [["ret20", "<=", -0.12]]),
+                      ("製造業のみ", [["mfg", ">=", 1]]), ("採用ルール", conds)):
+        tt_ = dedup_trades(q, apply(q, cs_) & pd.to_datetime(q["date"]).dt.normalize().isin(sd_))
+        if len(tt_):
+            md.append(f"| {lbl_} | {len(tt_)} | {pct(tt_['win'].mean())} | {pct(tt_['pnl'].mean(), 2)} |")
     # 相場の状態別：市場全体の下げの長さ・深さで分けた成績（長い下げ相場でも効くか）
     md += ["", "## 相場の状態別（市場全体の下げの長さ・深さ）", "", "| 区分 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
     for f_, cuts, unit in (("mkt_hi_days", [-1, 10, 30, 60, 1e9], "日"), ("mkt_dd120", [-1, -0.2, -0.1, -0.05, 1], ""),
