@@ -1857,6 +1857,36 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
            row("（外さない）", evaluate(q, conds, edges))]
     for i, c in enumerate(conds):
         md.append(row(fmt_cond(*c), evaluate(q, conds[:i] + conds[i + 1:], edges)))
+    # 担当2：条件の効き目が「少数の取引の入れ替わり」だけで出ていないか（同一銘柄の重複除外で買う日がずれる分も含む）
+    try:
+        def _keys(d):
+            return list(zip(d["code"].astype(str), pd.to_datetime(d["date"]).dt.strftime("%Y-%m-%d")))
+        kt = set(_keys(t))
+        md += ["", "## 条件ごとの取引の入れ替わり（その条件を外した版との差）", "",
+               "条件を外すと増える取引（＝その条件が除いた取引）と、外すと消える取引（＝同一銘柄の重複除外で買う日がずれて"
+               "その条件があるときだけ現れる取引）。入れ替わりが数件だけで勝率差が大きい条件は、少数の取引による偶然の疑い。", "",
+               "| 条件 | 除いた取引 | その勝率 | その平均損益 | 条件があるときだけの取引 | その勝率 | 外した版との勝率差 |",
+               "|---|---|---|---|---|---|---|"]
+        small = []
+        for i, c in enumerate(conds):
+            t2 = dedup_trades(q, apply(q, conds[:i] + conds[i + 1:]))
+            k2 = set(_keys(t2))
+            rem = t2[[k not in kt for k in _keys(t2)]]
+            add = t[[k not in k2 for k in _keys(t)]]
+            dwin = (t["win"].mean() - t2["win"].mean()) * 100 if len(t2) else float("nan")
+            md.append(f"| {fmt_cond(*c)} | {len(rem)} | {pct(rem['win'].mean()) if len(rem) else '-'} | "
+                      f"{pct(rem['pnl'].mean(), 2) if len(rem) else '-'} | {len(add)} | "
+                      f"{pct(add['win'].mean()) if len(add) else '-'} | {dwin:+.1f}pt |")
+            if 0 < len(rem) + len(add) <= 12:
+                small.append((c, rem, add))
+        for c, rem, add in small:
+            md += ["", f"- 入れ替わりが少ない条件：{fmt_cond(*c)}（除いた {len(rem)} 件・現れた {len(add)} 件）", "",
+                   "| 区分 | 信号日 | 銘柄 | 勝ち | 損益 |", "|---|---|---|---|---|"]
+            for lbl, d in (("除いた", rem), ("現れた", add)):
+                for _, r in d.sort_values("date").iterrows():
+                    md.append(f"| {lbl} | {pd.Timestamp(r['date']).date()} | {r['code']} | {int(r['win'])} | {pct(r['pnl'], 2)} |")
+    except Exception as e:  # 情報用の出力なので失敗しても本体は止めない
+        md += ["", f"（取引の入れ替わりの点検は失敗：{e}）"]
     md += ["", "## 閾値を少しずらしたとき（崖のように急に悪化するなら偶然の疑い）", "",
            "| 条件 → ずらした値 | 取引数 | 勝率 | 平均損益 | 各期間(取引数:勝率) |", "|---|---|---|---|---|"]
     for i, (f, op, th) in enumerate(conds):
