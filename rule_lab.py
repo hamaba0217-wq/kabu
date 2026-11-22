@@ -1432,6 +1432,94 @@ def write_outputs(state, q, last_date):
     open(RULES_HTML, "w", encoding="utf-8").write(html)
 
 
+ROBUST_MD = os.path.join("rules", "robustness.md")
+
+
+def _shift_variants(f, op, th):
+    """閾値を少しずらした版（情報用）。整数っぽい条件は±1、それ以外は|th|の±10%・±20%"""
+    if op == "==" or f in {"mfg", "mkt_seg"}:
+        return []
+    if float(th).is_integer() and abs(th) <= 10:
+        vals = [th - 1, th + 1]
+    else:
+        d = abs(th) if th != 0 else 0.01
+        vals = [th - 0.2 * d, th - 0.1 * d, th + 0.1 * d, th + 0.2 * d]
+    return [round(v, 6) for v in vals if v != th]
+
+
+def robustness_report(q, conds, edges, base, path=None):
+    """担当2の点検：採用ルールが偶然の当たりでないか（情報として出すだけ。採用判定には使わない）"""
+    path = path or ROBUST_MD
+    t = dedup_trades(q, apply(q, conds))
+    md = ["# 採用ルールの点検（偶然の当たりでないか）", "",
+          "情報として出すだけの点検結果です（採用基準 passes() には使っていません）。投資助言ではありません。", "",
+          f"更新 {dt.datetime.now():%Y-%m-%d %H:%M} ／ 基準（流動性のみ）勝率 {pct(base.get('win'))} n={base.get('n')}", "",
+          "## 対象のルール", ""] + [f"- {fmt_cond(*c)}" for c in BASE + conds]
+    if len(t) == 0:
+        md += ["", "取引0件"]
+        _write_keep_manual(path, md)
+        return
+    t = t.copy()
+    t["date"] = pd.to_datetime(t["date"])
+    md += ["", f"取引数 {len(t)} ／ 勝率 {pct(t['win'].mean())} ／ 平均損益 {pct(t['pnl'].mean(), 2)}", "",
+           "## 年別", "", "| 年 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
+    for y, g in t.groupby(t["date"].dt.year):
+        md.append(f"| {y} | {len(g)} | {pct(g['win'].mean())} | {pct(g['pnl'].mean(), 2)} |")
+    # 時期の集中
+    per = t["date"].dt.to_period("M")
+    mon = t.groupby(per).agg(n=("win", "size"), win=("win", "mean"), pnl=("pnl", "mean"))
+    mon = mon.sort_values("n", ascending=False)
+    wk = t.groupby(t["date"].dt.to_period("W"))["win"].size().sort_values(ascending=False)
+    md += ["", "## 時期の集中", "",
+           f"- 取引のあった日数 {t['date'].nunique()} ／ 月数 {len(mon)} ／ 週数 {len(wk)}",
+           f"- 最多の1か月に {mon['n'].iloc[0]/len(t)*100:.0f}% ／ 上位3か月に {mon['n'].iloc[:3].sum()/len(t)*100:.0f}% ／ "
+           f"上位3週に {wk.iloc[:3].sum()/len(t)*100:.0f}%", "",
+           "| 月 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
+    for p, r in mon.head(10).iterrows():
+        md.append(f"| {p} | {int(r['n'])} | {pct(r['win'])} | {pct(r['pnl'], 2)} |")
+    md.append("")
+    for k in (1, 3):
+        rest = t[~per.isin(set(mon.index[:k]))]
+        md.append(f"- 上位{k}か月を除くと：取引数 {len(rest)} 勝率 {pct(rest['win'].mean() if len(rest) else None)} "
+                  f"平均損益 {pct(rest['pnl'].mean() if len(rest) else None, 2)}")
+    # 銘柄の集中
+    cc = t["code"].value_counts()
+    md += ["", "## 銘柄の集中", "",
+           f"- 銘柄数 {len(cc)} ／ 最多銘柄 {cc.index[0]} が {cc.iloc[0]} 回（{cc.iloc[0]/len(t)*100:.0f}%）／ "
+           f"上位10銘柄で {cc.iloc[:10].sum()/len(t)*100:.0f}%"]
+    if "sector" in q.columns:
+        sec = q.loc[t.index, "sector"].value_counts()
+        md.append("- 業種の上位：" + "、".join(f"{s} {n}回" for s, n in sec.head(5).items()))
+
+    def row(lbl, r):
+        sp = r.get("splits") or []
+        return (f"| {lbl} | {r.get('n', 0)} | {pct(r.get('win'))} | {pct(r.get('pnl'), 2)} | "
+                + " / ".join(f"{s['n']}:{pct(s['win'])}" for s in sp) + " |")
+    md += ["", "## 条件を1つずつ外したとき", "",
+           "| 外した条件 | 取引数 | 勝率 | 平均損益 | 各期間(取引数:勝率) |", "|---|---|---|---|---|",
+           row("（外さない）", evaluate(q, conds, edges))]
+    for i, c in enumerate(conds):
+        md.append(row(fmt_cond(*c), evaluate(q, conds[:i] + conds[i + 1:], edges)))
+    md += ["", "## 閾値を少しずらしたとき（崖のように急に悪化するなら偶然の疑い）", "",
+           "| 条件 → ずらした値 | 取引数 | 勝率 | 平均損益 | 各期間(取引数:勝率) |", "|---|---|---|---|---|"]
+    for i, (f, op, th) in enumerate(conds):
+        for v in _shift_variants(f, op, th):
+            cs = conds[:i] + [[f, op, v]] + conds[i + 1:]
+            md.append(row(f"{fmt_cond(f, op, th)} → {fmt_cond(f, op, v)}", evaluate(q, cs, edges)))
+    _write_keep_manual(path, md)
+
+
+def _write_keep_manual(path, md):
+    """研究担当が手で書いた考察（AUTO 印より前）は残し、自動部分だけ書き換える"""
+    mark = "<!-- AUTO: ここから下は rule_lab.py が毎回書き換える -->"
+    head = ""
+    if os.path.exists(path):
+        old = open(path, encoding="utf-8").read()
+        if mark in old:
+            head = old.split(mark)[0]
+    open(path, "w", encoding="utf-8").write(head + mark + "\n\n" + "\n".join(md) + "\n")
+
+
 def explain(prev_conds, new_conds):
     p = {rule_key([c]): c for c in prev_conds}
     n = {rule_key([c]): c for c in new_conds}
@@ -1450,7 +1538,7 @@ def git_push(msg):
         r = subprocess.run(["git", *a], capture_output=True, text=True)
         print("git", " ".join(a), "->", r.returncode, (r.stdout + r.stderr).strip()[:300])
         return r.returncode
-    run("add", *[p for p in (RULES_MD, RULES_HTML, STATE, os.path.join("rules", "feature_report.md"))
+    run("add", *[p for p in (RULES_MD, RULES_HTML, STATE, os.path.join("rules", "feature_report.md"), ROBUST_MD)
                  if os.path.exists(p)])
     if run("commit", "-m", msg) != 0:
         return
@@ -1508,6 +1596,11 @@ def main():
     state["updated"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     os.makedirs("rules", exist_ok=True)
     json.dump(state, open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=1, default=float)
+    try:   # 担当2の点検（情報用。採用判定には使わない）
+        robustness_report(q, champ["conds"], edges, base)
+        print(f"{ROBUST_MD} を更新")
+    except Exception as e:
+        print("点検レポートの作成に失敗:", e)
     if improved or a.force_write or not os.path.exists(RULES_HTML):
         write_outputs(state, q, last_date)
         print("rules/RULES.md・docs/rules.html を更新")

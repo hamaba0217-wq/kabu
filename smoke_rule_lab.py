@@ -38,6 +38,8 @@ for cs in cands[:30]:
 st = {"champion": {"conds": [], **base}, "history": [], "tested": {}, "baseline": base,
       "updated": "test", "singles": R.single_report(q, edges, base)}
 R.write_outputs(st, q, q["date"].max())
+R.robustness_report(q, [["ret20", "<=", -0.1], ["hammer5", ">=", 1]], edges, base, path=os.path.join(tmp, "rb.md"))
+print(open(os.path.join(tmp, "rb.md"), encoding="utf-8").read()[:600])
 missing = [f for f in R.GRID if f not in q.columns]
 print("列が無い要因（本番データでのみ計算されるものは可）:", missing)
 print(f"SMOKE OK 条件{n_ok}個 候補{len(cands)}件 基準勝率{base['win']:.3f}")
