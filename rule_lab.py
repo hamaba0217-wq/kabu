@@ -231,6 +231,16 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         ctx["nt_chg5"] = _nt.pct_change(5)
     else:
         ctx["nt_chg20"] = ctx["nt_chg5"] = np.nan
+    # 仮説(2026-11-23 担当1 50周目)：銅(ETF 1693)の騰落と銅/金(1540)の比の変化（世界景気の先行指標。銅安＝景気不安の売り）。
+    # 円建てETFの t 終値で確定。欠けた日は直前の値
+    _cu, _au = _etf(q, ["1693", "16930"]), _etf(q, ["1540", "15400"])
+    if _cu is not None:
+        _cuc = _cu["close"].reindex(dates).ffill(limit=3)
+        ctx["cu_ret20"] = _cuc.pct_change(20)
+        ctx["cu_ret5"] = _cuc.pct_change(5)
+        ctx["cu_au20"] = np.log(_cuc / _au["close"].reindex(dates).ffill(limit=3)).diff(20) if _au is not None else np.nan
+    else:
+        ctx["cu_ret20"] = ctx["cu_ret5"] = ctx["cu_au20"] = np.nan
     ctx["month"] = ctx.index.month
     ctx["dow"] = ctx.index.dayofweek
     ctx["dom"] = ctx.index.day                                         # 仮説(2026-11-21 2回目)：月末・月初効果
@@ -1711,6 +1721,9 @@ GRID = {
     "jgb_slope_chg20": [(">=", 0.05), ("<=", -0.05), ("<=", 0.0)],
     "min1_5": [("<=", -0.08), ("<=", -0.05), (">=", -0.03)],
     "sec_cap_prev": [(">=", 0.15), (">=", 0.05), ("<=", 0.02)],
+    "cu_ret20": [("<=", -0.05), ("<=", 0.0), (">=", 0.05)],
+    "cu_ret5": [("<=", -0.03), ("<=", -0.02), (">=", 0.03)],
+    "cu_au20": [("<=", 0.0), (">=", 0.05)],
 }
 
 LABEL = {
@@ -1722,6 +1735,7 @@ LABEL = {
     "mkt20": "市場全体の20日騰落(中央値)", "close": "株価",
     "breadth": "値上がり銘柄の割合", "adr25": "騰落レシオ(25日)",
     "lev_z": "個人の強気度(レバETF/インバETF売買代金の偏差)", "rel_sec20": "業種平均に対する20日騰落の差",
+    "cu_ret20": "銅(ETF)の20日騰落", "cu_ret5": "銅(ETF)の5日騰落", "cu_au20": "銅/金の比の20日変化(対数)",
     "gold_ret20": "金(ETF)の20日騰落", "bond_ret20": "国債ETFの20日騰落", "reit_ret20": "REIT(ETF)の20日騰落",
     "nk_ret20": "日経225(ETF)の20日騰落", "vix": "VIX恐怖指数(前日)", "vix_chg5": "VIXの5日変化(ポイント)",
     "us10y_chg20": "米10年金利の20日変化(%pt)", "jgb10y_chg20": "日本10年国債金利の20日変化(%pt)",
