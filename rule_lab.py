@@ -179,6 +179,8 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         # 仮説(2026-11-22 43回目)：米国のグロース偏重（ナスダック-S&P500の5日騰落の差）・ドル円の60日平均からの乖離（円高・円安の水準）
         x["ndx_spx5"] = m["nasdaq"].pct_change(5) - m["sp500"].pct_change(5)
         x["usdjpy_dev60"] = m["usdjpy"] / m["usdjpy"].rolling(60, min_periods=40).mean() - 1
+        # 仮説(2026-11-22 45回目)：日米10年金利差の水準（前日）＝円キャリーの巻き戻しが起きやすい局面か
+        x["rate_sp"] = m["us10y"] - m["jgb10y"]
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
         x = x[~x.index.duplicated(keep="last")]
@@ -711,6 +713,17 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     else:
         q["sec_dn_streak"] = q["sec_lo60_frac"] = np.nan
     q["ret1_z"] = q["ret1"] / q["vol20"].replace(0, np.nan)
+    # 仮説(2026-11-22 45回目)：業種の急落状態（業種内の20日騰落-15%以下の割合≥15%）の連続日数＝業種ぐるみの急落の初期か長期化か、
+    # 業種内の5日騰落の順位（0=最も下げた）＝業種の中でも直近さらに売られたか。どちらも t 終値時点で確定
+    if "sector" in q.columns:
+        scs2 = q.groupby(["date", "sector"])["sec_crash"].first().sort_index()
+        son = (scs2 >= 0.15).astype(int)
+        sg2 = (son == 0).groupby(level=1).cumsum()
+        scd = son.groupby([son.index.get_level_values(1), sg2]).cumsum().astype(float).where(scs2.notna()).rename("sec_crash_days").reset_index()
+        q = q.merge(scd, on=["date", "sector"], how="left")
+        q["sec_rank5"] = q.groupby(["date", "sector"])["ret5"].rank(pct=True)
+    else:
+        q["sec_crash_days"] = q["sec_rank5"] = np.nan
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -940,6 +953,9 @@ GRID = {
     "sec_dn_streak": [(">=", 4), (">=", 2), ("<=", 0)],
     "ret1_z": [("<=", -2), ("<=", -1), (">=", 1)],
     "sec_lo60_frac": [(">=", 0.3), (">=", 0.15), ("<=", 0.03)],
+    "rate_sp": [(">=", 2.6), (">=", 2.3), ("<=", 2.0)],
+    "sec_crash_days": [("<=", 3), ("<=", 8), (">=", 15)],
+    "sec_rank5": [("<=", 0.1), ("<=", 0.25), (">=", 0.75)],
 }
 
 LABEL = {
@@ -1020,8 +1036,9 @@ LABEL = {
     "rsi2": "2日RSI", "rsi_div": "20日安値圏でのRSI14の20日最低からの戻り(強気ダイバージェンス)", "mkt_ret1": "市場全体のその日の騰落(中央値)",
     "ndx_spx5": "ナスダック-S&P500の5日騰落の差(前日)", "usdjpy_dev60": "ドル円の60日平均からの乖離(前日)", "sec_rsi2": "業種内の2日RSIの中央値",
     "sec_dn_streak": "業種の連続下落日数(業種の前日比の中央値)", "ret1_z": "当日の騰落/20日ボラ", "sec_lo60_frac": "業種内で60日安値をつけた銘柄の割合",
+    "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
 }
-POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
+POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
 
 
@@ -1041,7 +1058,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
@@ -1055,7 +1072,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
