@@ -1615,16 +1615,29 @@ def robustness_report(q, conds, edges, base, path=None):
     md += ["", "## 買う日をずらしたとき（d=1 が本来のルール：翌営業日の始値）", "",
            "| 買う日 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
     o, h, c, cd = (q[k].to_numpy() for k in ("open", "high", "close", "code"))
-    for d in (1, 2, 3, 5):
+
+    def sim(tt, d=1, hold=HOLD, tp=TP):
         w_, p_ = [], []
-        for i, code in zip(t.index.to_numpy(), t["code"].to_numpy()):
-            a, b = i + d, i + d + HOLD - 1
+        for i, code in zip(tt.index.to_numpy(), tt["code"].to_numpy()):
+            a, b = i + d, i + d + hold - 1
             if b >= len(q) or cd[b] != code or not np.isfinite(o[a]) or o[a] <= 0:
                 continue
-            win_ = np.nanmax(h[a:b + 1]) >= o[a] * (1 + TP)
+            win_ = np.nanmax(h[a:b + 1]) >= o[a] * (1 + tp)
             w_.append(win_)
-            p_.append(TP if win_ else c[b] / o[a] - 1)
-        md.append(f"| {d}営業日後 | {len(w_)} | {pct(float(np.mean(w_)) if w_ else None)} | {pct(float(np.mean(p_)) if p_ else None, 2)} |")
+            p_.append(tp if win_ else c[b] / o[a] - 1)
+        return len(w_), (float(np.mean(w_)) if w_ else None), (float(np.mean(p_)) if p_ else None)
+    for d in (1, 2, 3, 5):
+        n_, w_, p_ = sim(t, d=d)
+        md.append(f"| {d}営業日後 | {n_} | {pct(w_)} | {pct(p_, 2)} |")
+    # 勝ちの定義を少し変えたとき（情報用。採用に使う定義は +10%・20営業日のまま）。基準（流動性のみ）も同じ定義で比べる
+    bt = dedup_trades(q, apply(q, []))
+    md += ["", "## 勝ちの定義を少し変えたとき（情報用。本来は +10%・20営業日）", "",
+           "| 利確 | 保有日数 | 取引数 | 勝率 | 平均損益 | 基準の勝率 | 基準との差 |", "|---|---|---|---|---|---|---|"]
+    for tp_, hold_ in ((0.10, 20), (0.08, 20), (0.12, 20), (0.15, 20), (0.10, 10), (0.10, 15), (0.10, 25)):
+        n_, w_, p_ = sim(t, hold=hold_, tp=tp_)
+        _, bw, _ = sim(bt, hold=hold_, tp=tp_)
+        md.append(f"| +{tp_*100:.0f}% | {hold_}日 | {n_} | {pct(w_)} | {pct(p_, 2)} | {pct(bw)} | "
+                  f"{(w_ - bw) * 100:+.1f}pt |" if w_ is not None and bw is not None else f"| +{tp_*100:.0f}% | {hold_}日 | {n_} | - | - | - | - |")
     # 独立した局面ごと：信号日の間が30暦日より空いたら別の局面とみなす（同じ局面の取引は独立な試行ではない）
     ds = t.sort_values("date")
     ep = (ds["date"].diff().dt.days.fillna(0) > 30).cumsum()
