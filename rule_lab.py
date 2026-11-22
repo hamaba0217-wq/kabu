@@ -823,6 +823,20 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     _dn = _dn.sort_index()
     q["mkt_dn_tv"] = q["date"].map(_dn)
     q["mkt_dn_tv5"] = q["date"].map(_dn.rolling(5, min_periods=4).mean())
+    # 仮説(2026-11-22 担当2)：市場との連動の変化。市場全体の日次騰落(中央値)との20日相関・60日相関の差
+    # （急落で個別株が市場と一緒に売られた＝連れ安か）と、全銘柄の20日相関の平均（相場全体が一斉に動いている度合い）。t 終値時点で確定
+    if "mkt_ret1" in q.columns:
+        _mr = q["mkt_ret1"]
+        def _cr(w, mp):
+            rr = lambda s: s.groupby(q["code"]).transform(lambda x: x.rolling(w, min_periods=mp).mean())
+            c = rr(q["ret1"] * _mr) - rr(q["ret1"]) * rr(_mr)
+            v = (rr(q["ret1"] ** 2) - rr(q["ret1"]) ** 2) * (rr(_mr ** 2) - rr(_mr) ** 2)
+            return c / np.sqrt(v.where(v > 0))
+        q["mkt_corr20"] = _cr(20, 15)
+        q["mkt_corr_chg"] = q["mkt_corr20"] - _cr(60, 40)
+        q["mkt_corr_avg"] = q.groupby("date")["mkt_corr20"].transform("mean")
+    else:
+        q["mkt_corr20"] = q["mkt_corr_chg"] = q["mkt_corr_avg"] = np.nan
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -1046,6 +1060,9 @@ GRID = {
     "rsi2": [("<=", 5), ("<=", 15), (">=", 90)],
     "rsi_div": [(">=", 10), (">=", 5), ("<=", 1)],
     "mkt_ret1": [("<=", -0.02), ("<=", -0.01), (">=", 0.01)],
+    "mkt_corr20": [(">=", 0.7), (">=", 0.5), ("<=", 0.2)],
+    "mkt_corr_chg": [(">=", 0.2), (">=", 0.1), ("<=", -0.1)],
+    "mkt_corr_avg": [(">=", 0.45), (">=", 0.4), ("<=", 0.3)],
     "ndx_spx5": [("<=", -0.015), ("<=", -0.005), (">=", 0.01)],
     "usdjpy_dev60": [("<=", -0.03), ("<=", -0.01), (">=", 0.02)],
     "sec_rsi2": [("<=", 10), ("<=", 25), (">=", 75)],
@@ -1155,7 +1172,7 @@ LABEL = {
     "size_sp5": "小型株-大型株の5日騰落の差(時価総額の下位3割-上位3割)", "val_sp20": "低PBR株-高PBR株の20日騰落の差(下位3割-上位3割)",
     "ret20_xr": "20日騰落の全銘柄内の順位(0=最も下げた)", "sq_days": "次のSQ(第2金曜)までの暦日数", "div_days": "3月・9月末(配当の権利)までの暦日数",
     "sec_from_hi": "業種の52週高値からの位置(中央値)", "from_hi_rel": "52週高値からの位置-業種の中央値",
-    "rsi2": "2日RSI", "rsi_div": "20日安値圏でのRSI14の20日最低からの戻り(強気ダイバージェンス)", "mkt_ret1": "市場全体のその日の騰落(中央値)",
+    "rsi2": "2日RSI", "rsi_div": "20日安値圏でのRSI14の20日最低からの戻り(強気ダイバージェンス)", "mkt_ret1": "市場全体のその日の騰落(中央値)", "mkt_corr20": "市場全体(中央値)との20日相関", "mkt_corr_chg": "市場との20日相関−60日相関(連れ安の強まり)", "mkt_corr_avg": "全銘柄の市場との20日相関の平均(一斉に動く度合い)",
     "ndx_spx5": "ナスダック-S&P500の5日騰落の差(前日)", "usdjpy_dev60": "ドル円の60日平均からの乖離(前日)", "sec_rsi2": "業種内の2日RSIの中央値",
     "sec_dn_streak": "業種の連続下落日数(業種の前日比の中央値)", "ret1_z": "当日の騰落/20日ボラ", "sec_lo60_frac": "業種内で60日安値をつけた銘柄の割合",
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
