@@ -912,6 +912,13 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["stop_lo5"] = _sl.groupby(q["code"]).transform(lambda x: x.rolling(5, min_periods=5).sum())
     q["stop_hi20"] = _sh.groupby(q["code"]).transform(lambda x: x.rolling(20, min_periods=20).sum())
     q["mkt_stop_lo"] = _sl.groupby(q["date"]).transform("mean")
+    # 仮説(2026-11-22 担当2)：20日の下げのうち決算発表後の反応が占める割合（決算が原因の下げか、地合い・需給の下げか）。
+    # 直近20日以内に発表が無い銘柄は0。disc_ret・ret20 とも t 終値で確定
+    if "disc_ret" in q.columns:
+        _ds = (q["disc_ret"] / q["ret20"]).where((q["ret20"] < -0.05) & q["disc_ret"].notna())
+        q["disc_share"] = _ds.clip(-1, 2).where(q["disc_ret"].notna(), 0.0).where(q["ret20"].notna())
+    else:
+        q["disc_share"] = np.nan
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -1154,6 +1161,7 @@ GRID = {
     "dd20": [("<=", -0.20), ("<=", -0.12), (">=", -0.03)],
     "mfg_sp20": [("<=", -0.03), ("<=", -0.01), (">=", 0.02)],
     "xsec_disp20": [(">=", 0.06), (">=", 0.04), ("<=", 0.025)],
+    "disc_share": [(">=", 0.5), (">=", 0.2), ("<=", 0.0)],
     "stop_lo5": [(">=", 1), (">=", 2)],
     "stop_hi20": [(">=", 1), (">=", 2)],
     "mkt_stop_lo": [(">=", 0.001), (">=", 0.002)],
@@ -1272,7 +1280,7 @@ LABEL = {
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
     "bps_chg": "BPSの前回決算からの変化", "mkt_lo60_chg5": "市場全体の60日安値割合の5日変化", "sec_op_yoy": "業種内の営業利益の前年同期比(中央値)",
     "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
-    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
+    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "disc_share": "20日の下げのうち決算発表後の反応の割合(発表なし=0)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
