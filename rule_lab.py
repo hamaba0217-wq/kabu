@@ -2051,6 +2051,33 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
     for d in (1, 2, 3, 5):
         n_, w_, p_ = sim(t, d=d)
         md.append(f"| {d}営業日後 | {n_} | {pct(w_)} | {pct(p_, 2)} |")
+    # 担当2(50周目)：勝ちは「高値が+10%に届いた」で数えるので、場中の一瞬の高値（データの誤りを含む）だけの勝ちに頼っていないか。
+    # 初めて届いた日の終値で分類し、届いた日（買った日=1日目）の分布も出す（情報用。勝ちの定義は変えない）
+    try:
+        _cat, _day = [], []
+        for i, code in zip(t.index.to_numpy(), t["code"].to_numpy()):
+            a, b = i + 1, i + HOLD
+            if b >= len(q) or cd[b] != code or not np.isfinite(o[a]) or o[a] <= 0:
+                continue
+            tg_ = o[a] * (1 + TP)
+            hit_ = np.flatnonzero(h[a:b + 1] >= tg_)
+            if not len(hit_):
+                _cat.append("負け")
+                continue
+            j_ = a + hit_[0]
+            _day.append(int(hit_[0]) + 1)
+            _cat.append("届いた日の終値も+10%以上" if c[j_] >= tg_ else
+                        ("届いた日の終値は+5%〜+10%" if c[j_] >= o[a] * 1.05 else "届いた日の終値は+5%未満（高値だけ突出）"))
+        _vc = pd.Series(_cat).value_counts()
+        _dv = pd.Series(_day).value_counts().sort_index()
+        md += ["", "## +10%に届いた日の中身（場中の高値だけの勝ちに頼っていないか。情報用）", "",
+               "| 区分 | 取引数 | 割合 |", "|---|---|---|"]
+        md += [f"| {k_} | {int(v_)} | {v_ / len(_cat) * 100:.0f}% |" for k_, v_ in _vc.items()]
+        if len(_dv):
+            md += ["", "- 初めて届いた日（買った日=1日目）：" + "、".join(f"{int(d_)}日目 {int(n_)}件" for d_, n_ in _dv.head(10).items())
+                   + f"（中央値 {int(np.median(_day))}日目）"]
+    except Exception as e:
+        md += ["", f"（+10%に届いた日の集計は失敗：{e}）"]
     # 担当2(35周目)：翌朝の寄り付きの窓（信号日の終値→翌日の始値）別の成績。翌朝の値は判定日 t には分からないので
     # 条件には使えない（情報用）。「大きく上に寄ったら見送る」ような実際の買い方の目安になるかを見る
     try:
