@@ -2411,7 +2411,8 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
     except Exception as e:
         md += ["", f"（速報の期間を除いた成績の集計は失敗：{e}）"]
     # 担当2が検証中の条件について、seeds からその条件を外した版との差（その条件の上乗せが5年分でもあるか）
-    CHECK = ("disc_share", "mkt_us_corr20", "mkt_us_corr_chg", "mkt_corr_chg", "stop_lo5", "mkt_stop_lo", "xsec_disp_rel60", "xsec_disp_pk10", "xsec_disp_d4")
+    CHECK = ("disc_share", "mkt_us_corr20", "mkt_us_corr_chg", "mkt_corr_chg", "stop_lo5", "mkt_stop_lo", "xsec_disp_rel60", "xsec_disp_pk10", "xsec_disp_d4",
+             "sec_cap_pk5", "mkt_rate_corr60", "mkt_rate_corr_chg", "mkt_fx_corr_chg")   # 担当2 48周目：担当1の業種の投げ売り・担当2の金利相関
     crow = []
     for s in seeds:
         cs = [list(c) for c in s.get("conds", [])]
