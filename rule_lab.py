@@ -1599,6 +1599,9 @@ def write_outputs(state, q, last_date):
 <h2>直近データ日（{last_date.date()}）にルールを満たした銘柄</h2>
 <div class="tablewrap"><table><thead><tr><th>コード</th><th>業種</th><th>終値</th><th>前日比</th><th>20日騰落</th><th>出来高倍率</th></tr></thead>
 <tbody>{sig_rows or '<tr><td colspan=6>該当なし</td></tr>'}</tbody></table></div>
+<div class="card"><div class="name">このルールは偶然の当たりではないか？</div>
+<div class="stat">年別・局面ごとの成績、閾値や勝ちの定義をずらしたとき、条件を外したときの変化などの点検結果：
+<a href="robustness.html">採用ルールの点検</a></div></div>
 <h2>採用履歴（新しい順）</h2>
 {hist_html or '<div class="none">まだ初期ルールから更新されていません。</div>'}
 <div class="note">採用基準：取引数{MIN_N}以上・3分割の各期間{MIN_N_SPLIT}以上、全体勝率が現ルール+1pt以上、
@@ -1809,6 +1812,63 @@ def robustness_report(q, conds, edges, base, path=None):
     _write_keep_manual(path, md)
 
 
+ROBUST_HTML = os.path.join("docs", "robustness.html")
+
+
+def _md_to_html(text):
+    """robustness.md をサイト用の簡単な HTML にする（見出し・箇条書き・表・太字のみ）"""
+    import html as _h
+    import re as _re
+    def inl(x):
+        return _re.sub(r"\*\*(.+?)\*\*", r"<b></b>", _h.escape(x))
+    out, i, lines = [], 0, text.splitlines()
+    while i < len(lines):
+        ln = lines[i].rstrip()
+        if ln.startswith("<!--") or not ln.strip():
+            i += 1
+            continue
+        if ln.startswith("|"):
+            rows = []
+            while i < len(lines) and lines[i].startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                if not all(set(c) <= set("-: ") for c in cells):
+                    rows.append(cells)
+                i += 1
+            if rows:
+                th = "".join(f"<th>{inl(c)}</th>" for c in rows[0])
+                tb = "".join("<tr>" + "".join(f"<td>{inl(c)}</td>" for c in r) + "</tr>" for r in rows[1:])
+                out.append(f"<div class='tablewrap'><table><thead><tr>{th}</tr></thead><tbody>{tb}</tbody></table></div>")
+            continue
+        if ln.startswith("- "):
+            items = []
+            while i < len(lines) and lines[i].lstrip().startswith("- "):
+                items.append(f"<li>{inl(lines[i].lstrip()[2:])}</li>")
+                i += 1
+            out.append("<ul>" + "".join(items) + "</ul>")
+            continue
+        if ln.startswith("# "):
+            out.append(f"<h1>{inl(ln[2:])}</h1>")
+        elif ln.startswith("## "):
+            out.append(f"<h2>{inl(ln[3:])}</h2>")
+        else:
+            out.append(f"<p>{inl(ln)}</p>")
+        i += 1
+    return "\n".join(out)
+
+
+def write_robust_html():
+    if not os.path.exists(ROBUST_MD):
+        return
+    try:
+        from web_report import _page
+    except Exception:
+        _page = None
+    body = _md_to_html(open(ROBUST_MD, encoding="utf-8").read())
+    html = _page("採用ルールの点検", "rules", body) if _page else f"<!doctype html><meta charset=utf-8><body>{body}"
+    os.makedirs("docs", exist_ok=True)
+    open(ROBUST_HTML, "w", encoding="utf-8").write(html)
+
+
 def _write_keep_manual(path, md):
     """研究担当が手で書いた考察（AUTO 印より前）は残し、自動部分だけ書き換える"""
     mark = "<!-- AUTO: ここから下は rule_lab.py が毎回書き換える -->"
@@ -1838,7 +1898,7 @@ def git_push(msg):
         r = subprocess.run(["git", *a], capture_output=True, text=True)
         print("git", " ".join(a), "->", r.returncode, (r.stdout + r.stderr).strip()[:300])
         return r.returncode
-    run("add", *[p for p in (RULES_MD, RULES_HTML, STATE, os.path.join("rules", "feature_report.md"), ROBUST_MD)
+    run("add", *[p for p in (RULES_MD, RULES_HTML, STATE, os.path.join("rules", "feature_report.md"), ROBUST_MD, ROBUST_HTML)
                  if os.path.exists(p)])
     if run("commit", "-m", msg) != 0:
         return
@@ -1898,7 +1958,8 @@ def main():
     json.dump(state, open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=1, default=float)
     try:   # 担当2の点検（情報用。採用判定には使わない）
         robustness_report(q, champ["conds"], edges, base)
-        print(f"{ROBUST_MD} を更新")
+        write_robust_html()
+        print(f"{ROBUST_MD}・{ROBUST_HTML} を更新")
     except Exception as e:
         print("点検レポートの作成に失敗:", e)
     if improved or a.force_write or not os.path.exists(RULES_HTML):
