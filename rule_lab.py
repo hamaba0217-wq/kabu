@@ -2711,6 +2711,46 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
     if crow:
         md += ["", "## 検証中の条件の上乗せ（seeds からその条件を外した版との比較）", "",
                "| 条件 | 外した版の勝率 | 足した版の勝率 | 差 | 最悪期間の勝率 | 元の条件 |", "|---|---|---|---|---|---|"] + crow
+    # 担当2 77周目：研究中の銘柄ごとの要因が、同じ信号日の中でも効くか（買う日の選別でないか）を5年分で確かめる（情報用）
+    try:
+        SD_BASES = (("20日騰落≤-15%", [["ret20", "<=", -0.15]]),
+                    ("≤-15%×グロース以外×同業種急落≥15%", [["ret20", "<=", -0.15], ["mkt_seg", "<=", 2], ["sec_crash", ">=", 0.15]]))
+        SD_F = (("nk_beta", ">=", 0.5), ("nk_beta", ">=", 1.0), ("mfg", ">=", 1), ("min1_5", "<=", -0.05), ("vol20", ">=", 0.03),
+                ("big_dn20", ">=", 3), ("turn20", ">=", 0.012), ("hammer5", ">=", 1), ("tv5_60", "<=", 1.2), ("ovn20", "<=", -0.10),
+                ("gap_fill", "<=", 0.15), ("mg_long_chg4", "<=", 0.0), ("mg_ratio", ">=", 5))
+        srow = []
+        for bl, bc in SD_BASES:
+            tb = dedup_trades(q, apply(q, bc))
+            if tb.empty:
+                continue
+            for f, op, th in SD_F:
+                if f not in q.columns:
+                    continue
+                v = q.loc[tb.index, f]
+                inn = ((v >= th) if op == ">=" else (v <= th)).values
+                tt = tb.assign(inn=inn)
+                a_, b_ = tt[tt["inn"]], tt[~tt["inn"]]
+                if len(a_) < 20 or len(b_) < 20:
+                    continue
+                g_ = tt.groupby(["date", "inn"])["win"].agg(["size", "mean"]).unstack()
+                if not all((k_, b2) in g_.columns for k_ in ("size", "mean") for b2 in (True, False)):
+                    continue
+                g_ = g_.dropna()
+                if not len(g_):
+                    continue
+                w_ = np.minimum(g_[("size", True)], g_[("size", False)])
+                d_ = g_[("mean", True)] - g_[("mean", False)]
+                srow.append(f"| {bl} | {fmt_cond(f, op, th)} | {len(a_)} | {pct(a_['win'].mean())} | {pct(b_['win'].mean())} | "
+                            f"{(a_['win'].mean() - b_['win'].mean()) * 100:+.1f}pt | {float((d_ * w_).sum() / w_.sum()) * 100:+.1f}pt | "
+                            f"{len(g_)} | {float((d_ > 0).mean()) * 100:.0f}% | {a_['date'].nunique()} / {tb['date'].nunique()} |")
+        if srow:
+            md += ["", "## 研究中の要因の同じ日の中での効き（5年分。情報用）", "",
+                   "土台の取引を条件を満たす／満たさないに分け、同じ信号日の中で勝率を比べる（日ごとの差を少ない側の件数で重みづけ）。"
+                   "全体の差より同じ日の中の差がずっと小さい条件は、主に買う日を選ぶ役。", "",
+                   "| 土台 | 条件 | 満たす取引 | その勝率 | 満たさない取引の勝率 | 全体の差 | 同じ日の中の差 | 比べた日数 | 上回った日の割合 | 満たす取引の信号日 / 土台の信号日 |",
+                   "|---|---|---|---|---|---|---|---|---|---|"] + srow
+    except Exception as e:  # 情報用の出力なので失敗しても本体は止めない
+        md += ["", f"（研究中の要因の同じ日の中での効きの集計は失敗：{e}）"]
     _write_keep_manual(path, md)
 
 
