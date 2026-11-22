@@ -1891,17 +1891,26 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
         wk = dd.dt.to_period("W").value_counts()
         qw = tt.groupby(pd.to_datetime(tt["date"]).dt.to_period("Q"))["win"].agg(["mean", "size"])
         qw5 = qw[qw["size"] >= 5]
+        # 仮説(担当2 30周目)：信号日を単位にしたブートストラップ（500回）の勝率の5%点＝同じ日の重なりを考えた悪い側の勝率
+        gdw = tt.groupby(pd.to_datetime(tt["date"]).dt.normalize())["win"].agg(["sum", "size"])
+        b5 = None
+        if len(gdw) >= 3:
+            rs_ = np.random.default_rng(0)
+            sw_, sn_ = gdw["sum"].to_numpy(float), gdw["size"].to_numpy(float)
+            ix_ = rs_.integers(0, len(gdw), (500, len(gdw)))
+            b5 = float(np.percentile(sw_[ix_].sum(1) / sn_[ix_].sum(1), 5))
         srows.append((tt["win"].mean(), len(tt), tt["pnl"].mean(), wk.size, wk.iloc[:3].sum() / len(tt), epn,
                       " かつ ".join(fmt_cond(*c) for c in cs), qw["mean"].mean(), len(qw),
-                      (qw5["mean"].min() if len(qw5) else None)))
+                      (qw5["mean"].min() if len(qw5) else None), b5))
     if srows:
         srows.sort(key=lambda x: -x[0])
         md += ["", f"## seeds の局面集中（取引30件以上の {len(srows)} 個、勝率の高い順）", "",
-               "（四半期の勝率＝取引のあった四半期を1つずつ等しく数えた勝率、最悪の四半期＝取引5件以上の四半期で最も低い勝率）", "",
-               "| 勝率 | 取引数 | 平均損益 | 週数 | 上位3週の割合 | 局面の数 | 四半期の勝率 | 四半期数 | 最悪の四半期 | 条件 |",
-               "|---|---|---|---|---|---|---|---|---|---|"]
-        md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {pct(qm)} | {qn} | {pct(qmin)} | {lbl} |"
-               for w, n, p, wkn, t3, e, lbl, qm, qn, qmin in srows]
+               "（四半期の勝率＝取引のあった四半期を1つずつ等しく数えた勝率、最悪の四半期＝取引5件以上の四半期で最も低い勝率、"
+               "信号日単位5%点＝信号日を単位にしたブートストラップ500回の勝率の5%点）", "",
+               "| 勝率 | 取引数 | 平均損益 | 週数 | 上位3週の割合 | 局面の数 | 四半期の勝率 | 四半期数 | 最悪の四半期 | 信号日単位5%点 | 条件 |",
+               "|---|---|---|---|---|---|---|---|---|---|---|"]
+        md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {pct(qm)} | {qn} | {pct(qmin)} | {pct(b5)} | {lbl} |"
+               for w, n, p, wkn, t3, e, lbl, qm, qn, qmin, b5 in srows]
     # 担当2が検証中の条件について、seeds からその条件を外した版との差（その条件の上乗せが5年分でもあるか）
     CHECK = ("disc_share", "mkt_us_corr20", "mkt_us_corr_chg", "mkt_corr_chg", "stop_lo5", "mkt_stop_lo", "xsec_disp_rel60")
     crow = []
