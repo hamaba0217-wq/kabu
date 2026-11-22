@@ -150,6 +150,9 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         m = None
     if m is not None and len(m):
         m = m.sort_index().ffill()
+        for col in ("vix", "us10y", "usdjpy", "wti", "sp500", "nasdaq", "jgb10y", "jgb2y"):
+            if col not in m.columns:            # 取得できなかった指標は空欄（その要因の条件は該当なしになる）
+                m[col] = np.nan
         x = pd.DataFrame(index=m.index)
         x["vix"] = m["vix"]
         x["vix_chg5"] = m["vix"] - m["vix"].shift(5)

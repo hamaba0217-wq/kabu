@@ -25,12 +25,15 @@ FRED = {
 MOF_URLS = ["https://www.mof.go.jp/jgbs/reference/interest_rate/data/jgbcm_all.csv",
             "https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv"]
 PATH = os.path.join("data", "macro.pkl")
+# FRED は GitHub Actions のサーバーからだと応答しないことがあるため、PC で取得した値を
+# リポジトリに保存しておき（macro_snapshot.csv）、取得できない指標はそこから補う。
+SNAP = "macro_snapshot.csv"
 UA = {"User-Agent": "Mozilla/5.0 (research script)"}
 
 
 def _fred(sid):
     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd=2019-01-01"
-    df = pd.read_csv(io.StringIO(requests.get(url, headers=UA, timeout=60).text))
+    df = pd.read_csv(io.StringIO(requests.get(url, headers=UA, timeout=(10, 30)).text))
     df.columns = ["date", "v"]
     df["date"] = pd.to_datetime(df["date"])
     df["v"] = pd.to_numeric(df["v"], errors="coerce")
@@ -72,27 +75,44 @@ def fetch():
             cols[name] = _fred(sid)
         except Exception as e:
             print(f"  [警告] FRED {sid} 取得失敗: {e}")
+            if not cols and name == "vix":   # 1件目から応答しないなら残りも同じなので打ち切る
+                print("  [警告] FRED に接続できないため、保存済みの値（macro_snapshot.csv）を使う")
+                break
     df = pd.DataFrame(cols)
+    if df.empty:
+        df.index = pd.DatetimeIndex([], name="date")
     j = _mof()
     if j is not None:
         df = df.join(j, how="outer")
     df = df.sort_index()
     df = df[df.index >= "2019-01-01"]
-    if len(df):
+    snap = _snap()
+    if len(df) or snap is not None:
         os.makedirs("data", exist_ok=True)
         old = load()
         if old is not None:
             df = df.combine_first(old)
+        if snap is not None:
+            df = df.combine_first(snap)
         df.to_pickle(PATH)
+        if all(c in cols for c in FRED):     # 全部取れた（PC など）ときだけ保存版を更新
+            df.to_csv(SNAP, float_format="%.6g")
     print(f"  外部指標 {list(df.columns)} {df.index.min()}〜{df.index.max()}")
     return df
+
+
+def _snap():
+    try:
+        return pd.read_csv(SNAP, index_col=0, parse_dates=True)
+    except Exception:
+        return None
 
 
 def load():
     try:
         return pd.read_pickle(PATH)
     except Exception:
-        return None
+        return _snap()
 
 
 if __name__ == "__main__":
