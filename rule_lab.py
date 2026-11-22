@@ -1643,7 +1643,7 @@ def _shift_variants(f, op, th):
     return [round(v, 6) for v in vals if v != th]
 
 
-def robustness_report(q, conds, edges, base, path=None):
+def robustness_report(q, conds, edges, base, path=None, singles=None):
     """担当2の点検：採用ルールが偶然の当たりでないか（情報として出すだけ。採用判定には使わない）"""
     path = path or ROBUST_MD
     t = dedup_trades(q, apply(q, conds))
@@ -1768,6 +1768,7 @@ def robustness_report(q, conds, edges, base, path=None):
            "| 外した条件（累積） | 残りの条件数 | 取引数 | 取引のあった週 | 勝率 | 平均損益 | 各期間(取引数:勝率) |",
            "|---|---|---|---|---|---|---|"]
     cur = list(conds)
+    core3 = None
     r0 = evaluate(q, cur, edges)
     md.append(f"| （元のルール） | {len(cur)} | {r0.get('n', 0)} | {weeks(cur)} | {pct(r0.get('win'))} | {pct(r0.get('pnl'), 2)} | "
               + " / ".join(f"{s['n']}:{pct(s['win'])}" for s in r0.get("splits") or []) + " |")
@@ -1782,6 +1783,27 @@ def robustness_report(q, conds, edges, base, path=None):
         md.append(f"| {fmt_cond(*cur[i])} | {len(cs)} | {r.get('n', 0)} | {weeks(cs)} | {pct(r.get('win'))} | {pct(r.get('pnl'), 2)} | "
                   + " / ".join(f"{s['n']}:{pct(s['win'])}" for s in r.get("splits") or []) + " |")
         cur = cs
+        if len(cur) == 3:
+            core3 = list(cur)
+    # 簡単な3条件版に1条件ずつ足したとき：局面（週）を減らさずに勝率を上げる条件はどれか（要因別の成績の上位150条件から）
+    if singles and core3:
+        rc = evaluate(q, core3, edges)
+        wc = weeks(core3)
+        used = {c[0] for c in core3}
+        rows3 = []
+        for sg in [x["cond"] for x in singles[:150]]:
+            if sg[0] in used:
+                continue
+            cs = core3 + [list(sg)]
+            r = evaluate(q, cs, edges)
+            sp = r.get("splits") or []
+            if r.get("n", 0) >= 300 and all(x["n"] >= 30 and (x["pnl"] or -1) > 0 for x in sp):
+                rows3.append((r["win"], r["n"], weeks(cs), min(x["win"] for x in sp), fmt_cond(*sg)))
+        rows3.sort(key=lambda x: -x[0])
+        md += ["", f"## 簡単な3条件版に1条件ずつ足したとき（取引300件以上・各期間30件以上・損益プラスのもの、上位30）", "",
+               f"3条件版：{' かつ '.join(fmt_cond(*c) for c in core3)} → 勝率 {pct(rc.get('win'))} 取引数 {rc.get('n', 0)} 週 {wc}", "",
+               "| 足した条件 | 勝率 | 取引数 | 取引のあった週 | 最悪期間の勝率 |", "|---|---|---|---|---|"]
+        md += [f"| {lbl} | {pct(w)} | {n} | {wk_} | {pct(mn)} |" for w, n, wk_, mn, lbl in rows3[:30]]
     # seeds の局面集中（勝率が高くても少数の局面に偏っていないか）
     try:
         seeds = json.load(open(os.path.join("rules", "seeds.json"), encoding="utf-8")).get("seeds", [])
@@ -1972,7 +1994,7 @@ def main():
     os.makedirs("rules", exist_ok=True)
     json.dump(state, open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=1, default=float)
     try:   # 担当2の点検（情報用。採用判定には使わない）
-        robustness_report(q, champ["conds"], edges, base)
+        robustness_report(q, champ["conds"], edges, base, singles=state.get("singles"))
         write_robust_html()
         print(f"{ROBUST_MD}・{ROBUST_HTML} を更新")
     except Exception as e:
