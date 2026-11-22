@@ -248,6 +248,10 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             f = f.sort_values(["code", "disclosed_date"])
             b = f.dropna(subset=["bps"])
             b = b[b["bps"] > 0][["code", "disclosed_date", "bps"]].drop_duplicates(["code", "disclosed_date"], keep="last")
+            # 仮説(2026-11-22 46回目)：BPSの前回の決算からの変化（純資産の積み上がり＝利益の蓄積・自社株買い）。分割(±50%超)は除外
+            b = b.sort_values(["code", "disclosed_date"])
+            b["bps_chg"] = b.groupby("code")["bps"].pct_change()
+            b.loc[b["bps_chg"].abs() > 0.5, "bps_chg"] = np.nan
             fc = f.dropna(subset=["fc_operating_profit"]).drop_duplicates(["code", "disclosed_date"], keep="last").copy()
             prev = fc.groupby("code")["fc_operating_profit"].shift(1)
             pgap = (fc["disclosed_date"] - fc.groupby("code")["disclosed_date"].shift(1)).dt.days
@@ -567,6 +571,9 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q = q.merge(dn_m.groupby((dn_m == 0).cumsum()).cumsum().astype(float).rename("mkt_dn_streak"), on="date", how="left")
     atlo = (q["low"] <= q["lo60"]).astype(float).where(q["lo60"].notna())
     q = q.merge(atlo.groupby(q["date"]).mean().rename("mkt_lo60_frac"), on="date", how="left")
+    # 仮説(2026-11-22 46回目)：市場全体の60日安値割合の5日変化（投げ売りが収まりつつあるか）。t 終値で確定
+    _ml = q.groupby("date")["mkt_lo60_frac"].first().sort_index()
+    q = q.merge((_ml - _ml.shift(5)).rename("mkt_lo60_chg5"), on="date", how="left")
     q["sec_rel5"] = q["sec5"] - q["mkt5"] if "sec5" in q.columns else np.nan
     # 仮説(2026-11-22 27回目)：日本の市場全体の60日高値からの下落（全銘柄の前日比の中央値を積み上げた指数）・
     # 業種内での20日騰落の順位（0=業種で最も下げた銘柄）・直近5日で下ヒゲ≥2%をつけた日数（下値での買い支え）。t 終値時点で確定
@@ -724,6 +731,16 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["sec_rank5"] = q.groupby(["date", "sector"])["ret5"].rank(pct=True)
     else:
         q["sec_crash_days"] = q["sec_rank5"] = np.nan
+    # 仮説(2026-11-22 46回目)：業種内の営業利益の前年同期比の中央値（業種の業績の向き）。発表済みの決算のみ
+    q["sec_op_yoy"] = q.groupby(["date", "sector"])["op_yoy"].transform("median") if "op_yoy" in q.columns else np.nan
+    # 仮説(2026-11-22 46回目2周目)：業種の5日騰落の業種間の順位（0=最も下げた業種、短期の業種ローテーション）・
+    # 20日高値（終値）からの下落率（直近の戻り高値からの深さ）。t 終値時点で確定
+    if "sector" in q.columns:
+        s5r = q.groupby(["date", "sector"])["sec5"].first()
+        q["sec5_rank"] = s5r.groupby(level=0).rank(pct=True).reindex(pd.MultiIndex.from_arrays([q["date"], q["sector"]])).values
+    else:
+        q["sec5_rank"] = np.nan
+    q["dd20"] = q["close"] / q.groupby("code", sort=False)["close"].transform(lambda s: s.rolling(20, min_periods=20).max()) - 1
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -956,6 +973,11 @@ GRID = {
     "rate_sp": [(">=", 2.6), (">=", 2.3), ("<=", 2.0)],
     "sec_crash_days": [("<=", 3), ("<=", 8), (">=", 15)],
     "sec_rank5": [("<=", 0.1), ("<=", 0.25), (">=", 0.75)],
+    "bps_chg": [(">=", 0.03), (">=", 0.01), ("<=", -0.01)],
+    "mkt_lo60_chg5": [("<=", -0.1), ("<=", -0.03), (">=", 0.05)],
+    "sec_op_yoy": [(">=", 0.15), (">=", 0.0), ("<=", -0.15)],
+    "sec5_rank": [("<=", 0.1), ("<=", 0.25), (">=", 0.8)],
+    "dd20": [("<=", -0.20), ("<=", -0.12), (">=", -0.03)],
 }
 
 LABEL = {
@@ -1037,6 +1059,8 @@ LABEL = {
     "ndx_spx5": "ナスダック-S&P500の5日騰落の差(前日)", "usdjpy_dev60": "ドル円の60日平均からの乖離(前日)", "sec_rsi2": "業種内の2日RSIの中央値",
     "sec_dn_streak": "業種の連続下落日数(業種の前日比の中央値)", "ret1_z": "当日の騰落/20日ボラ", "sec_lo60_frac": "業種内で60日安値をつけた銘柄の割合",
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
+    "bps_chg": "BPSの前回決算からの変化", "mkt_lo60_chg5": "市場全体の60日安値割合の5日変化", "sec_op_yoy": "業種内の営業利益の前年同期比(中央値)",
+    "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
