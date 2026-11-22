@@ -1104,6 +1104,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     _tv_all = (q["turnover_value"] if "turnover_value" in q.columns else q["close"] * q["volume"]).to_numpy(float)
     _c_all, _h_all, _l_all = q["close"].to_numpy(float), q["high"].to_numpy(float), q["low"].to_numpy(float)
     _o10 = np.full(len(q), np.nan); _oa = np.full(len(q), np.nan); _gf = np.full(len(q), np.nan); _gc = np.full(len(q), np.nan)
+    _sp5 = np.full(len(q), np.nan); _poc = np.full(len(q), np.nan)
     for _ix in q.groupby("code", sort=False).indices.values():
         n = len(_ix)
         if n < 41:
@@ -1117,6 +1118,14 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
             tot = np.where(tot > 0, tot, np.nan)
             _o10[_ix[W - 1:]] = (tvw * ((tpw > cl) & (tpw <= cl * 1.10))).sum(1) / tot
             _oa[_ix[W - 1:]] = (tvw * (tpw > cl)).sum(1) / tot
+            _sp5[_ix[W - 1:]] = (tvw * ((tpw <= cl) & (tpw >= cl * 0.95))).sum(1) / tot
+            with np.errstate(invalid="ignore", divide="ignore"):
+                _bn = np.clip(np.floor(np.log(tpw / cl) / 0.02), -25, 25)
+            _bn = np.nan_to_num(_bn, nan=-25).astype(int) + 25
+            _hist = np.zeros((len(cl), 51))
+            np.add.at(_hist, (np.repeat(np.arange(len(cl)), W), _bn.ravel()), tvw.ravel())
+            _pk = _hist.argmax(1)
+            _poc[_ix[W - 1:]] = np.where(np.isfinite(tot), np.exp((_pk - 25 + 0.5) * 0.02) - 1, np.nan)
         G = 40
         top = np.r_[np.nan, ll[:-1]]                         # 前日の安値（窓の上端）
         with np.errstate(invalid="ignore"):
@@ -1135,6 +1144,9 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     # 仮説(2026-11-22 担当1 31周目)：埋まっていない下窓の数（窓を開けて下げた回数）、市場全体で+10%以内に窓が残る銘柄の割合
     # （一斉に窓を開けて下げた相場か）、TOPIX ETF(1306)自身の窓埋め余地（指数の戻り目標）。t 終値で確定
     q["gap_cnt"] = _gc
+    # 仮説(2026-11-22 担当1 32周目)：下値の支え（60日の売買代金のうち終値〜-5%で売買された割合＝今の水準で買った人の多さ）と、
+    # 最も売買が多かった価格帯（60日の価格帯別売買代金の山・2%刻み）の終値からの距離（上に山があれば戻りの目標になる仮説）
+    q["sup5"], q["poc_dist"] = _sp5, _poc
     _gok = ~q["etf"] if "etf" in q.columns else pd.Series(True, index=q.index)
     q["mkt_gap_frac"] = (q["gap_fill"] <= 0.10).astype(float).where(q["gap_fill"].notna() & _gok).groupby(q["date"]).transform("mean")
     _ig = q.loc[q["code"].isin(["1306", "13060"]), ["date", "gap_fill"]].drop_duplicates("date").set_index("date")["gap_fill"]
@@ -1455,6 +1467,8 @@ GRID = {
     "ovh_all": [("<=", 0.5), (">=", 0.8), (">=", 0.95)],
     "gap_fill": [("<=", 0.05), ("<=", 0.10), ("<=", 0.20), (">=", 9)],
     "gap_cnt": [(">=", 1), (">=", 2), (">=", 3)],
+    "sup5": [(">=", 0.3), (">=", 0.15), ("<=", 0.05)],
+    "poc_dist": [(">=", 0.10), (">=", 0.20), ("<=", 0.0)],
     "mkt_gap_frac": [(">=", 0.3), (">=", 0.15), ("<=", 0.05)],
     "idx_gap_fill": [("<=", 0.05), ("<=", 0.10), (">=", 9)],
 }
@@ -1545,7 +1559,7 @@ LABEL = {
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
     "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数", "mkt_rv_off": "市場全体のボラ拡大-直近5日の最大値(乱高下の峠越え)", "mkt_speed": "市場全体の下げの速さ(5日騰落/20日騰落の中央値)", "sales_yld": "予想売上高/時価総額(PSRの逆数)", "mkt_dn_tv": "市場全体の売買代金のうち下落銘柄の割合", "mkt_dn_tv5": "市場全体の売買代金のうち下落銘柄の割合(5日平均)", "disc_season": "直近10日以内に決算発表した銘柄の割合(決算シーズン)", "mkt_disc_ret": "直近10日の決算発表銘柄の株価反応(中央値)", "round_up": "上の切りのよい株価(桁の半分単位)までの距離", "fx_tail20": "為替の追い風(為替感応度×ドル円の20日変化)", "rate_corr60": "日本10年金利の上昇との60日相関(金利感応度)", "rate_tail20": "金利の追い風(金利感応度×10年金利の20日変化)", "fx_tail5": "為替の短期の追い風(為替感応度×ドル円の5日変化)", "oil_tail20": "原油の追い風(原油との相関×WTIの20日騰落)", "sec_fx_tail20": "業種全体の為替の追い風(中央値)", "fx_tail_rel": "為替の追い風-業種の中央値", "us_tail20": "米国株の追い風(米国株との相関×S&P500の20日騰落)", "sec_us_tail20": "業種全体の米国株の追い風(中央値)", "sec_disc_ret": "同業種で直近10日に決算発表した銘柄の株価反応(中央値)", "riskoff5": "リスクオフの総合点(5日で円高・VIX上昇・米金利低下・米株安の数)", "riskoff_off": "リスクオフの和らぎ(総合点-直近5日の最大)", "mkt_share": "20日の下げのうち市場全体で説明できる割合(ベータ×市場の騰落)", "sec_share": "20日の下げのうち業種全体で説明できる割合", "pm_ret": "前月の月間騰落", "mtd_ret": "月初来の騰落(前月末から)", "lim_dn20": "直近20日でストップ安付近で引けた日数", "lim_up20": "直近20日でストップ高付近で引けた日数", "gold_corr60": "金(ETF)との60日相関", "gold_tail20": "金の追い風(金との相関×金の20日騰落)", "beta_up60": "市場が上げた日だけの60日ベータ", "beta_dn60": "市場が下げた日だけの60日ベータ", "beta_asym": "上げの日のベータ−下げの日のベータ", "up_day_xs20": "直近20日の市場が上げた日の超過騰落(平均)", "vix_rv_gap": "VIX(前日)−日経225の20日実現ボラ", "dn_day_xs20": "直近20日の市場が下げた日の超過騰落(平均)", "updn_xs20": "上げた日の超過騰落−下げた日の超過騰落", "sec_up_xs20": "業種内の市場が上げた日の超過騰落(中央値)", "up_xs_rel": "市場が上げた日の超過騰落−業種の中央値", "pbr_cross1": "急落でPBR1倍を新たに割った(20日前は1倍超)", "pbr_vs1": "PBR−1", "mkt_pbr1_frac": "市場全体でPBR1倍割れの銘柄の割合", "mkt_pbr1_chg20": "PBR1倍割れの銘柄の割合の20日変化", "is_def": "ディフェンシブ業種(食料品・医薬品・電気ガス・陸運)", "def_sp20": "ディフェンシブ業種−それ以外の20日騰落の差(中央値)", "def_sp5": "ディフェンシブ業種−それ以外の5日騰落の差(中央値)", "split60": "直近60日以内に株式分割", "split120": "直近120日以内に株式分割", "rsplit120": "直近120日以内に株式併合", "dd_hist": "過去の-10%下落の起きやすさ(確定済みの直近60回)", "big_dn20": "直近20日の大陰線(前日比-5%以下)の日数", "big_dn_share": "20日の下げのうち大陰線の日の下げの割合", "nt_chg20": "NT倍率(日経225/TOPIXのETF)の20日変化", "nt_chg5": "NT倍率の5日変化", "pnl_hist": "過去の平均損益(確定済みの直近60回)", "crash_hit_hist": "その銘柄の急落時(20日騰落≤-15%)の過去の勝率(確定済み・120日)", "mkt_crash_hit": "市場全体の最近の急落買いの勝率(確定済み・20営業日)",
-    "ovh10": "上値の売り圧力(60日の売買代金のうち終値〜+10%で売買された割合)", "ovh_all": "上に捕まった買い手(60日の売買代金のうち終値より上の割合)", "gap_fill": "埋まっていない上の下窓までの距離(40日・窓なし=9.9)", "gap_cnt": "埋まっていない上の下窓の数(40日)", "mkt_gap_frac": "市場全体で+10%以内に埋まっていない下窓がある銘柄の割合", "idx_gap_fill": "TOPIX(ETF)の埋まっていない上の下窓までの距離(窓なし=9.9)",
+    "ovh10": "上値の売り圧力(60日の売買代金のうち終値〜+10%で売買された割合)", "ovh_all": "上に捕まった買い手(60日の売買代金のうち終値より上の割合)", "gap_fill": "埋まっていない上の下窓までの距離(40日・窓なし=9.9)", "gap_cnt": "埋まっていない上の下窓の数(40日)", "sup5": "下値の支え(60日の売買代金のうち終値〜-5%で売買された割合)", "poc_dist": "60日で最も売買が多かった価格帯の終値からの距離", "mkt_gap_frac": "市場全体で+10%以内に埋まっていない下窓がある銘柄の割合", "idx_gap_fill": "TOPIX(ETF)の埋まっていない上の下窓までの距離(窓なし=9.9)",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1583,7 +1597,7 @@ def fmt_cond(f, op, th):
         return "製造業" if op == ">=" else "非製造業"
     if f == "is_def":
         return "ディフェンシブ業種" if op == ">=" else "ディフェンシブ業種以外"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
