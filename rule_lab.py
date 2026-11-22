@@ -1969,6 +1969,7 @@ def write_outputs(state, q, last_date):
 
 
 ROBUST_MD = os.path.join("rules", "robustness.md")
+QUICK_FROM = pd.Timestamp("2026-04-01")   # 手元の速報データ（quick_lab.py）の開始日。seeds はこの期間で見つけている
 
 
 def _shift_variants(f, op, th):
@@ -2307,6 +2308,9 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
     except Exception:
         seeds = []
     srows = []
+    # 担当2(45周目)：seeds は手元の速報データ（QUICK_FROM 以降の約8か月）で見つけたもの。5年分の勝率にはその期間も含まれるので、
+    # 速報に使っていない期間（QUICK_FROM より前）だけの勝率を別に出す＝見つけた期間の外でも効くか（情報用。採用判定には使わない）
+    oos_rows = []
     # 担当3 18周目：seeds が採用されない理由（情報用。passes() と同じ順に判定するだけで、採用の判定には使わない）
     try:
         rch_ = evaluate(q, conds, edges)
@@ -2357,6 +2361,10 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
         srows.append((tt["win"].mean(), len(tt), tt["pnl"].mean(), wk.size, wk.iloc[:3].sum() / len(tt), epn,
                       " かつ ".join(fmt_cond(*c) for c in cs), qw["mean"].mean(), len(qw),
                       (qw5["mean"].min() if len(qw5) else None), b5, spt_, why_))
+        _is = pd.to_datetime(tt["date"]) >= QUICK_FROM
+        oos_rows.append((float(tt["win"].mean()), len(tt), int((~_is).sum()),
+                         float(tt.loc[~_is, "win"].mean()) if (~_is).any() else None, int(_is.sum()),
+                         float(tt.loc[_is, "win"].mean()) if _is.any() else None, " かつ ".join(fmt_cond(*c) for c in cs)))
     if srows:
         srows.sort(key=lambda x: -x[0])
         md += ["", f"## seeds の局面集中（取引30件以上の {len(srows)} 個、勝率の高い順）", "",
@@ -2366,6 +2374,23 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
                "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {pct(qm)} | {qn} | {pct(qmin)} | {pct(b5)} | {lbl} | {spt} | {why} |"
                for w, n, p, wkn, t3, e, lbl, qm, qn, qmin, b5, spt, why in srows]
+    try:
+        _ct = dedup_trades(q, apply(q, conds))
+        _ci = pd.to_datetime(_ct["date"]) >= QUICK_FROM
+        _ok = [r for r in oos_rows if r[2] >= 30 and r[4] >= 10]
+        md += ["", f"## 速報に使った期間を除いた成績（seeds を見つけた手元データ {QUICK_FROM:%Y-%m-%d} 以降を除く。情報用）", "",
+               f"- 採用ルール：除いた期間 {int((~_ci).sum())}件 {pct(_ct.loc[~_ci, 'win'].mean() if (~_ci).any() else None)} ／ "
+               f"速報の期間 {int(_ci.sum())}件 {pct(_ct.loc[_ci, 'win'].mean() if _ci.any() else None)}"]
+        if _ok:
+            _d = np.array([r[5] - r[3] for r in _ok])
+            md += [f"- seeds（両方の期間に件数がある {len(_ok)} 個）：速報の期間の勝率 − 除いた期間の勝率 の中央値 {np.median(_d) * 100:+.1f}pt、"
+                   f"除いた期間の方が5pt以上低いもの {int((_d > 0.05).sum())} 個（見つけた期間だけで効いている疑い）", "",
+                   "| 5年分の勝率 | 取引数 | 除いた期間の取引数 | 除いた期間の勝率 | 速報の期間の取引数 | 速報の期間の勝率 | 条件 |",
+                   "|---|---|---|---|---|---|---|"]
+            md += [f"| {pct(w)} | {n} | {no} | {pct(wo)} | {ni} | {pct(wi)} | {lbl} |"
+                   for w, n, no, wo, ni, wi, lbl in sorted(_ok, key=lambda x: -x[0])[:40]]
+    except Exception as e:
+        md += ["", f"（速報の期間を除いた成績の集計は失敗：{e}）"]
     # 担当2が検証中の条件について、seeds からその条件を外した版との差（その条件の上乗せが5年分でもあるか）
     CHECK = ("disc_share", "mkt_us_corr20", "mkt_us_corr_chg", "mkt_corr_chg", "stop_lo5", "mkt_stop_lo", "xsec_disp_rel60", "xsec_disp_pk10", "xsec_disp_d4")
     crow = []
