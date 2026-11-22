@@ -741,6 +741,17 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     else:
         q["sec5_rank"] = np.nan
     q["dd20"] = q["close"] / q.groupby("code", sort=False)["close"].transform(lambda s: s.rolling(20, min_periods=20).max()) - 1
+    # 仮説(2026-11-22 47回目)：製造業-非製造業の20日騰落の差（景気敏感株のローテーション）・業種の20日騰落の業種間のばらつき
+    # （業種ローテーションの激しさ）・業種内のボラ拡大(5日/60日)の中央値（業種ぐるみの変動の拡大）。すべて t 終値時点で確定
+    if "sector" in q.columns and "mfg" in q.columns:
+        _m = q["ret20"].where(q["mfg"] == 1).groupby(q["date"]).transform("median")
+        _n = q["ret20"].where(q["mfg"] == 0).groupby(q["date"]).transform("median")
+        q["mfg_sp20"] = _m - _n
+        _sd = q.groupby(["date", "sector"])["sec20"].first().groupby(level=0).std().rename("xsec_disp20")
+        q = q.merge(_sd, on="date", how="left")
+        q["sec_vol_exp"] = q.groupby(["date", "sector"])["vol_exp"].transform("median")
+    else:
+        q["mfg_sp20"] = q["xsec_disp20"] = q["sec_vol_exp"] = np.nan
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -978,6 +989,9 @@ GRID = {
     "sec_op_yoy": [(">=", 0.15), (">=", 0.0), ("<=", -0.15)],
     "sec5_rank": [("<=", 0.1), ("<=", 0.25), (">=", 0.8)],
     "dd20": [("<=", -0.20), ("<=", -0.12), (">=", -0.03)],
+    "mfg_sp20": [("<=", -0.03), ("<=", -0.01), (">=", 0.02)],
+    "xsec_disp20": [(">=", 0.06), (">=", 0.04), ("<=", 0.025)],
+    "sec_vol_exp": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
 }
 
 LABEL = {
@@ -1061,6 +1075,8 @@ LABEL = {
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
     "bps_chg": "BPSの前回決算からの変化", "mkt_lo60_chg5": "市場全体の60日安値割合の5日変化", "sec_op_yoy": "業種内の営業利益の前年同期比(中央値)",
     "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
+    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)",
+    "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
