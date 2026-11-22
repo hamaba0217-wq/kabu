@@ -311,6 +311,8 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             old = (q["date"] - q["d_fz"]).dt.days > 200
             q["op_yield"] = (q["fc_op_now"] / q["mcap"].replace(0, np.nan)).where(~old)
             q["fc_margin"] = (q["fc_op_now"] / q["fc_ns"].where(q["fc_ns"] > 0)).where(~old)
+            # 仮説(2026-11-22 52回目)：予想売上高の利回り（会社予想の売上高/時価総額＝PSRの逆数。赤字でも測れる割安さ）
+            q["sales_yld"] = (q["fc_ns"].where(q["fc_ns"] > 0) / q["mcap"].replace(0, np.nan)).where(~old)
             q = q.drop(columns=["d_fz", "fc_op_now", "fc_ns"])
             # 仮説(2026-11-21 15回目)：今期見通しの伸び＝直近の会社予想営業利益/直近の本決算(FY)の営業利益実績 − 1
             fya = g0[(g0["period_type"] == "FY") & (g0["operating_profit"] > 0)][["code", "disclosed_date", "operating_profit"]]                 .drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date")                 .rename(columns={"disclosed_date": "d_fya", "operating_profit": "fy_op"})
@@ -815,6 +817,12 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["mkt_speed"] = (q["mkt5"] / q["mkt20"]).where(q["mkt20"] <= -0.02)
     else:
         q["mkt_speed"] = np.nan
+    # 仮説(2026-11-22 52回目)：市場全体の売買代金のうち下落銘柄が占める割合（件数でなく金額で見た売り圧力）の当日値と5日平均
+    _tv = q["turnover_value"] if "turnover_value" in q.columns else q["close"] * q["volume"]
+    _dn = _tv.where(q["ret1"] < 0, 0.0).groupby(q["date"]).sum() / _tv.groupby(q["date"]).sum().replace(0, np.nan)
+    _dn = _dn.sort_index()
+    q["mkt_dn_tv"] = q["date"].map(_dn)
+    q["mkt_dn_tv5"] = q["date"].map(_dn.rolling(5, min_periods=4).mean())
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -1067,6 +1075,9 @@ GRID = {
     "lh_streak": [(">=", 5), (">=", 3), ("<=", 0)],
     "mkt_rv_off": [("<=", -0.3), ("<=", -0.1), (">=", 0)],
     "mkt_speed": [(">=", 0.8), (">=", 0.5), ("<=", 0.2)],
+    "sales_yld": [(">=", 2.0), (">=", 1.0), ("<=", 0.3)],
+    "mkt_dn_tv": [(">=", 0.8), (">=", 0.7), ("<=", 0.3)],
+    "mkt_dn_tv5": [(">=", 0.65), (">=", 0.6), ("<=", 0.4)],
 }
 
 LABEL = {
@@ -1154,7 +1165,7 @@ LABEL = {
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
-    "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数", "mkt_rv_off": "市場全体のボラ拡大-直近5日の最大値(乱高下の峠越え)", "mkt_speed": "市場全体の下げの速さ(5日騰落/20日騰落の中央値)",
+    "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数", "mkt_rv_off": "市場全体のボラ拡大-直近5日の最大値(乱高下の峠越え)", "mkt_speed": "市場全体の下げの速さ(5日騰落/20日騰落の中央値)", "sales_yld": "予想売上高/時価総額(PSRの逆数)", "mkt_dn_tv": "市場全体の売買代金のうち下落銘柄の割合", "mkt_dn_tv5": "市場全体の売買代金のうち下落銘柄の割合(5日平均)",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1190,7 +1201,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
