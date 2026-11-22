@@ -241,6 +241,15 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         ctx["cu_au20"] = np.log(_cuc / _au["close"].reindex(dates).ffill(limit=3)).diff(20) if _au is not None else np.nan
     else:
         ctx["cu_ret20"] = ctx["cu_ret5"] = ctx["cu_au20"] = np.nan
+    # 仮説(2026-11-23 担当1 55周目)：中国株(東証上場の上証50連動ETF 1309)の20日・5日騰落（中国景気の不安＝製造業の需要の合図）。t 終値で確定。
+    # 売買が少ないETFなので、欠けた日は直前の値（3日まで）
+    _cn = _etf(q, ["1309", "13090"])
+    if _cn is not None:
+        _cnc = _cn["close"].reindex(dates).ffill(limit=3)
+        ctx["cn_ret20"] = _cnc.pct_change(20)
+        ctx["cn_ret5"] = _cnc.pct_change(5)
+    else:
+        ctx["cn_ret20"] = ctx["cn_ret5"] = np.nan
     ctx["month"] = ctx.index.month
     ctx["dow"] = ctx.index.dayofweek
     ctx["dom"] = ctx.index.day                                         # 仮説(2026-11-21 2回目)：月末・月初効果
@@ -1761,6 +1770,8 @@ GRID = {
     "cu_ret20": [("<=", -0.05), ("<=", 0.0), (">=", 0.05)],
     "cu_ret5": [("<=", -0.03), ("<=", -0.02), (">=", 0.03)],
     "cu_au20": [("<=", 0.0), (">=", 0.05)],
+    "cn_ret20": [("<=", -0.03), (">=", 0.03)],
+    "cn_ret5": [("<=", -0.02), ("<=", -0.04), (">=", 0.02)],
     "fomc_next": [("<=", 3), ("<=", 5), (">=", 15)],
     "fomc_prev": [("<=", 3), ("<=", 5)],
     "boj_next": [("<=", 3), ("<=", 5), (">=", 15)],
@@ -1778,6 +1789,7 @@ LABEL = {
     "lev_z": "個人の強気度(レバETF/インバETF売買代金の偏差)", "rel_sec20": "業種平均に対する20日騰落の差",
     "boj_next": "日銀の金融政策決定会合の結果が出るまでの営業日数", "boj_prev": "日銀の金融政策決定会合の結果が出てからの営業日数(0=当日)",
     "fomc_next": "FOMCの結果が判明するまでの営業日数", "fomc_prev": "FOMCの結果が判明してからの営業日数",
+    "cn_ret20": "中国株(上証50 ETF)の20日騰落", "cn_ret5": "中国株(上証50 ETF)の5日騰落",
     "cu_ret20": "銅(ETF)の20日騰落", "cu_ret5": "銅(ETF)の5日騰落", "cu_au20": "銅/金の比の20日変化(対数)",
     "gold_ret20": "金(ETF)の20日騰落", "bond_ret20": "国債ETFの20日騰落", "reit_ret20": "REIT(ETF)の20日騰落",
     "nk_ret20": "日経225(ETF)の20日騰落", "vix": "VIX恐怖指数(前日)", "vix_chg5": "VIXの5日変化(ポイント)",
