@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>勝率改善ルール</title>
+<style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f8f9fa; color: #333; line-height: 1.6; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    h1 { color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; font-size: 1.5em; }
+    h2 { color: #2c3e50; margin-top: 26px; font-size: 1.2em; border-left: 4px solid #1a73e8; padding-left: 10px; }
+    .nav { display: flex; flex-wrap: wrap; gap: 6px; background: #1a73e8; padding: 8px 12px; position: sticky; top: 0; z-index: 10; }
+    .nav a { color: #fff; text-decoration: none; font-weight: 600; font-size: 0.9em; padding: 6px 10px; border-radius: 6px; }
+    .nav a.active { background: rgba(255,255,255,0.25); }
+    .nav a:hover { background: rgba(255,255,255,0.15); }
+    .date-badge { background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 4px; font-weight: bold; display: inline-block; margin-bottom: 20px; }
+    .strategy-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+    .strategy-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 20px; border-top: 4px solid #1a73e8; }
+    .strategy-card.alt { border-top-color: #28a745; }
+    .strategy-card h3 { margin-top: 0; color: #1a73e8; font-size: 1.1em; }
+    .strategy-card.alt h3 { color: #28a745; }
+    .strategy-card p { font-size: 0.9em; margin-bottom: 10px; }
+    .strategy-card ul { font-size: 0.85em; padding-left: 20px; color: #555; }
+    .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-top: 15px; font-size: 0.9em; }
+    th, td { padding: 11px 13px; text-align: center; border-bottom: 1px solid #eee; white-space: nowrap; }
+    th { background: #1a73e8; color: #fff; font-weight: 600; cursor: pointer; user-select: none; }
+    th[data-sortable]:after { content: " \2195"; opacity: 0.5; font-size: 0.85em; }
+    tr:hover { background: #f1f3f4; }
+    .badge-main { background: #e8f0fe; color: #1a73e8; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+    .badge-sub { background: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+    .price-buy { font-weight: bold; color: #2c3e50; }
+    .price-tp { font-weight: bold; color: #137333; }
+    .price-sl { font-weight: bold; color: #d93025; }
+    .win { color: #137333; font-weight: bold; }
+    .lose { color: #d93025; font-weight: bold; }
+    .track { color: #8a6d00; font-weight: bold; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 16px 20px; margin-top: 12px; }
+    .no-data { text-align: center; padding: 40px; color: #666; background: #fff; border-radius: 8px; margin-top: 15px; }
+    .note { color: #888; font-size: 0.82em; margin-top: 16px; }
+    footer { margin-top: 40px; text-align: center; font-size: 0.8em; color: #888; padding-bottom: 30px; }
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 15px; }
+    .chart-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); padding: 12px 14px; }
+    .chart-card .ttl { font-weight: 700; color: #2c3e50; font-size: 0.95em; }
+    .chart-card .sub { color: #888; font-size: 0.8em; margin-bottom: 6px; }
+    .chart-card .px { font-size: 0.8em; margin-top: 4px; }
+    .chart-card .px b { color: #2c3e50; } .chart-card .px .tp { color: #137333; } .chart-card .px .sl { color: #d93025; }
+    svg.candles { width: 100%; height: auto; display: block; border: 1px solid #f0f0f0; border-radius: 4px; }
+    .chart-none { color: #999; font-size: 0.85em; padding: 20px; text-align: center; }
+    .pick-list { margin-top: 15px; }
+    .pick-list .chart-card { margin-bottom: 14px; max-width: 640px; }
+    .chart-card .ttl .res { margin-left: 6px; font-size: 0.9em; }
+    .legend { font-size: 0.78em; color: #777; margin: 6px 0 0; }
+    .legend .up { color: #1e88e5; font-weight: 700; } .legend .dn { color: #e53935; font-weight: 700; }
+    @media (max-width: 640px) {
+      .wrap { padding: 10px; }
+      h1 { font-size: 1.2em; } h2 { font-size: 1.05em; }
+      .nav { gap: 4px; padding: 6px 8px; }
+      .nav a { font-size: 0.8em; padding: 5px 8px; }
+      .tablewrap { overflow-x: visible; }
+      /* 表を縦積みカード化（横スクロール廃止） */
+      table { font-size: 0.92em; box-shadow: none; background: transparent; border-radius: 0; }
+      thead { position: absolute; left: -9999px; top: -9999px; }
+      table, tbody, tr, td { display: block; width: 100%; box-sizing: border-box; }
+      tr { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-bottom: 10px; padding: 4px 12px; }
+      tr:hover { background: #fff; }
+      td { text-align: right; white-space: normal; border-bottom: 1px dashed #eee; padding: 8px 0; padding-left: 44%; position: relative; }
+      td:last-child { border-bottom: none; }
+      td::before { content: attr(data-label); position: absolute; left: 0; width: 42%; text-align: left; color: #888; font-weight: 600; white-space: normal; }
+      .chart-grid { grid-template-columns: 1fr; gap: 12px; }
+      .strategy-container { grid-template-columns: 1fr; }
+    }
+</style>
+</head><body>
+<div class="nav"><a href="index.html">📋 今日の候補</a><a href="ipo.html">🚀 IPO注目</a><a href="recent.html">🗓 過去10日の推奨</a><a href="results.html">📈 推奨のその後（実績）</a><a href="rules.html" class="active">🎯 勝率改善ルール</a></div>
+<div class="wrap">
+
+<h1>🎯 勝率改善ルール（1か月で+10%）</h1>
+<div class="meta">最終更新 2026-11-22 03:50 ／ データ最終日 2026-11-20 ／ 検証ルール数 累計 1000</div>
+<div class="card strong">
+  <div class="name">現在のルール <span class="pill up">勝率 76.1%</span></div>
+  <ul><li>20日平均売買代金 >= 5億円</li><li>株価 >= 200円</li><li>20日騰落 <= -12%</li><li>グロース以外(プライム・スタンダード)</li><li>同業種で20日騰落-15%以下の銘柄の割合 >= +15%</li><li>製造業</li><li>直近5日で下ヒゲ≥2%の日数 >= 1</li><li>売買代金の5日平均/60日平均 <= 1.2</li></ul>
+  <div class="stat">取引数 750 ／ 平均損益 6.49% ／ 1か月内に一時-10%まで下落した割合 30.1%<br>
+  比較：条件なし（流動性のみ）の勝率 27.7%、平均損益 0.40%</div>
+  <div class="tablewrap"><table><thead><tr><th>期間(3分割)</th><th>取引数</th><th>勝率</th><th>平均損益</th></tr></thead>
+  <tbody><tr><td>期間1</td><td>105</td><td>63.8%</td><td>4.32%</td></tr><tr><td>期間2</td><td>120</td><td>69.2%</td><td>5.18%</td></tr><tr><td>期間3</td><td>525</td><td>80.2%</td><td>7.22%</td></tr></tbody></table></div>
+</div>
+<h2>勝ちの定義と売買方法</h2>
+<div class="card"><ul>
+<li>シグナル日の<b>終値</b>で条件を判定し、<b>翌営業日の始値</b>で買う</li>
+<li>買値の <b>+10% に指値</b>（売り）を置く。20営業日（約1か月）以内に届けば勝ち</li>
+<li>届かなければ <b>20営業日目の終値で売却</b>（必ず1か月以内に手仕舞い）</li>
+<li>同じ銘柄は保有中に買い増ししない</li>
+</ul></div>
+<h2>直近データ日（2026-11-20）にルールを満たした銘柄</h2>
+<div class="tablewrap"><table><thead><tr><th>コード</th><th>業種</th><th>終値</th><th>前日比</th><th>20日騰落</th><th>出来高倍率</th></tr></thead>
+<tbody><tr><td>285A0</td><td>電気機器</td><td>7,307</td><td>-11.7%</td><td>-42.0%</td><td>1.1</td></tr><tr><td>69760</td><td>電気機器</td><td>6,187</td><td>-8.4%</td><td>-28.9%</td><td>0.7</td></tr><tr><td>80350</td><td>電気機器</td><td>8,309</td><td>-7.1%</td><td>-12.1%</td><td>1.1</td></tr><tr><td>69200</td><td>電気機器</td><td>30,250</td><td>-9.2%</td><td>-18.8%</td><td>1.1</td></tr><tr><td>40620</td><td>電気機器</td><td>4,672</td><td>-11.2%</td><td>-45.7%</td><td>1.2</td></tr><tr><td>69810</td><td>電気機器</td><td>4,700</td><td>-8.9%</td><td>-26.9%</td><td>0.8</td></tr><tr><td>58030</td><td>非鉄金属</td><td>2,252</td><td>-12.2%</td><td>-44.8%</td><td>1.4</td></tr><tr><td>61460</td><td>機械</td><td>41,350</td><td>-8.3%</td><td>-19.3%</td><td>0.9</td></tr><tr><td>70110</td><td>機械</td><td>2,722</td><td>-5.5%</td><td>-26.2%</td><td>0.9</td></tr><tr><td>58010</td><td>非鉄金属</td><td>1,620</td><td>-12.7%</td><td>-45.0%</td><td>1.2</td></tr><tr><td>65250</td><td>電気機器</td><td>4,897</td><td>-11.0%</td><td>-28.0%</td><td>0.8</td></tr><tr><td>50160</td><td>非鉄金属</td><td>1,820</td><td>-9.5%</td><td>-37.6%</td><td>1.4</td></tr><tr><td>58020</td><td>非鉄金属</td><td>1,236</td><td>-7.9%</td><td>-34.2%</td><td>1.1</td></tr><tr><td>67520</td><td>電気機器</td><td>2,687</td><td>-10.9%</td><td>-27.4%</td><td>1.4</td></tr><tr><td>67230</td><td>電気機器</td><td>2,425</td><td>-7.0%</td><td>-16.9%</td><td>0.7</td></tr><tr><td>67020</td><td>電気機器</td><td>3,332</td><td>-2.3%</td><td>-27.1%</td><td>0.7</td></tr><tr><td>67620</td><td>電気機器</td><td>2,116</td><td>-6.9%</td><td>-23.9%</td><td>0.9</td></tr><tr><td>77350</td><td>電気機器</td><td>7,121</td><td>-9.0%</td><td>-39.5%</td><td>0.7</td></tr><tr><td>34360</td><td>金属製品</td><td>1,829</td><td>-10.1%</td><td>-23.4%</td><td>0.9</td></tr><tr><td>57060</td><td>非鉄金属</td><td>1,120</td><td>-13.3%</td><td>-47.0%</td><td>1.8</td></tr><tr><td>57130</td><td>非鉄金属</td><td>5,368</td><td>-11.3%</td><td>-33.7%</td><td>1.3</td></tr><tr><td>62730</td><td>機械</td><td>55,300</td><td>-5.8%</td><td>-13.0%</td><td>1.1</td></tr><tr><td>69630</td><td>電気機器</td><td>2,620</td><td>-7.1%</td><td>-30.3%</td><td>1.0</td></tr><tr><td>31100</td><td>ガラス･土石製品</td><td>2,098</td><td>-10.6%</td><td>-29.1%</td><td>0.8</td></tr><tr><td>65060</td><td>電気機器</td><td>3,180</td><td>-8.5%</td><td>-21.2%</td><td>1.2</td></tr><tr><td>67870</td><td>電気機器</td><td>7,720</td><td>-7.8%</td><td>-18.3%</td><td>1.1</td></tr><tr><td>65040</td><td>電気機器</td><td>10,010</td><td>-8.2%</td><td>-24.7%</td><td>0.8</td></tr><tr><td>63610</td><td>機械</td><td>3,241</td><td>-6.5%</td><td>-15.3%</td><td>0.9</td></tr><tr><td>53440</td><td>ガラス･土石製品</td><td>37,660</td><td>-7.5%</td><td>-21.0%</td><td>0.6</td></tr><tr><td>41830</td><td>化学</td><td>1,573</td><td>-4.7%</td><td>-23.5%</td><td>1.0</td></tr></tbody></table></div>
+<h2>採用履歴（新しい順）</h2>
+<div class='card'><div class='name'>2026-11-22 採用 <span class='pill up'>勝率 76.1%</span></div><div class='stat'>前のルール: 勝率 73.2% → 76.1%（取引数 750、平均損益 6.49%）</div><ul><li>20日騰落 <= -12%</li><li>グロース以外(プライム・スタンダード)</li><li>同業種で20日騰落-15%以下の銘柄の割合 >= +15%</li><li>製造業</li><li>直近5日で下ヒゲ≥2%の日数 >= 1</li><li>売買代金の5日平均/60日平均 <= 1.2</li></ul><div class='stat'>追加: 20日騰落 <= -12%、直近5日で下ヒゲ≥2%の日数 >= 1、売買代金の5日平均/60日平均 <= 1.2 ／ 削除: 20日騰落 <= -15%、ボラで割った20日騰落(20日騰落/(60日ボラ×√20)) >= -150%</div></div><div class='card'><div class='name'>2026-11-22 採用 <span class='pill up'>勝率 73.2%</span></div><div class='stat'>前のルール: 勝率 72.0% → 73.2%（取引数 922、平均損益 6.05%）</div><ul><li>20日騰落 <= -15%</li><li>グロース以外(プライム・スタンダード)</li><li>同業種で20日騰落-15%以下の銘柄の割合 >= +15%</li><li>ボラで割った20日騰落(20日騰落/(60日ボラ×√20)) >= -150%</li><li>製造業</li></ul><div class='stat'>追加: グロース以外(プライム・スタンダード)、同業種で20日騰落-15%以下の銘柄の割合 >= +15%、ボラで割った20日騰落(20日騰落/(60日ボラ×√20)) >= -150% ／ 削除: 個別の窓(当日の窓-全銘柄の窓の中央値) <= -2%、VIXの5日変化(ポイント) >= 3</div></div><div class='card'><div class='name'>2026-11-22 採用 <span class='pill up'>勝率 72.0%</span></div><div class='stat'>前のルール: 勝率 70.3% → 72.0%（取引数 924、平均損益 5.67%）</div><ul><li>20日騰落 <= -15%</li><li>個別の窓(当日の窓-全銘柄の窓の中央値) <= -2%</li><li>VIXの5日変化(ポイント) >= 3</li><li>製造業</li></ul><div class='stat'>追加: 20日騰落 <= -15%、個別の窓(当日の窓-全銘柄の窓の中央値) <= -2%、VIXの5日変化(ポイント) >= 3、製造業 ／ 削除: 20日騰落 <= -20%、個別の窓(当日の窓-全銘柄の窓の中央値) <= -3%、市場に対する60日ベータ >= +150%</div></div><div class='card'><div class='name'>2026-11-22 採用 <span class='pill up'>勝率 70.3%</span></div><div class='stat'>前のルール: 勝率 65.2% → 70.3%（取引数 1053、平均損益 3.92%）</div><ul><li>20日騰落 <= -20%</li><li>個別の窓(当日の窓-全銘柄の窓の中央値) <= -3%</li><li>市場に対する60日ベータ >= +150%</li></ul><div class='stat'>追加: 個別の窓(当日の窓-全銘柄の窓の中央値) <= -3%、市場に対する60日ベータ >= +150% ／ 削除: VIXの5日変化(ポイント) >= 3</div></div><div class='card'><div class='name'>2026-11-22 採用 <span class='pill up'>勝率 65.2%</span></div><div class='stat'>前のルール: 勝率 27.7% → 65.2%（取引数 2291、平均損益 4.12%）</div><ul><li>20日騰落 <= -20%</li><li>VIXの5日変化(ポイント) >= 3</li></ul><div class='stat'>追加: 20日騰落 <= -20%、VIXの5日変化(ポイント) >= 3</div></div>
+<div class="note">採用基準：取引数150以上・3分割の各期間30以上、全体勝率が現ルール+1pt以上、
+最悪期間の勝率も現ルールより上、3期間すべてで平均損益プラス。多数のルールを試すため、偶然の当たりが
+混ざる可能性は残ります。手数料・スリッページ・税は未考慮。データの遅延（J-Quantsのプラン）にご注意ください。
+本ページは過去データの統計であり、投資助言ではありません。売買の判断と結果責任は利用者にあります。</div>
+
+<footer><p>© 2026 株式投資自動スクリーニングシステム ／ 投資助言ではありません・自己責任・手数料未考慮</p></footer>
+</div>
+
+<script>
+document.querySelectorAll('table').forEach(function(tbl){
+  // スマホ縦積み用：各セルに見出しラベルを付与
+  var hs = Array.prototype.map.call(tbl.querySelectorAll('thead th'), function(th){
+    return th.textContent.replace(/[\u2191\u2193\u2195]/g,'').trim();
+  });
+  function relabel(){
+    tbl.querySelectorAll('tbody tr').forEach(function(tr){
+      Array.prototype.forEach.call(tr.cells, function(td,i){
+        if (hs[i] !== undefined) td.setAttribute('data-label', hs[i]);
+      });
+    });
+  }
+  relabel();
+  var ths = tbl.querySelectorAll('thead th[data-sortable]');
+  ths.forEach(function(th, idx){
+    var col = th.cellIndex;
+    var asc = true;
+    th.addEventListener('click', function(){
+      var tb = tbl.querySelector('tbody');
+      var rows = Array.prototype.slice.call(tb.querySelectorAll('tr'));
+      rows.sort(function(a,b){
+        var x = a.cells[col].getAttribute('data-v') || a.cells[col].innerText;
+        var y = b.cells[col].getAttribute('data-v') || b.cells[col].innerText;
+        var nx = parseFloat(String(x).replace(/[^0-9.\-]/g,''));
+        var ny = parseFloat(String(y).replace(/[^0-9.\-]/g,''));
+        var both = !isNaN(nx) && !isNaN(ny);
+        if (both) return asc ? nx-ny : ny-nx;
+        return asc ? String(x).localeCompare(String(y),'ja') : String(y).localeCompare(String(x),'ja');
+      });
+      rows.forEach(function(r){ tb.appendChild(r); });
+      asc = !asc;
+    });
+  });
+});
+</script>
+
+</body></html>
