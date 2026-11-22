@@ -1546,6 +1546,20 @@ def robustness_report(q, conds, edges, base, path=None):
         rest = t[~per.isin(set(mon.index[:k]))]
         md.append(f"- 上位{k}か月を除くと：取引数 {len(rest)} 勝率 {pct(rest['win'].mean() if len(rest) else None)} "
                   f"平均損益 {pct(rest['pnl'].mean() if len(rest) else None, 2)}")
+    # 買うのが遅れたら：d 営業日後の始値で買い、そこから HOLD 日（d=1 が本来のルール）。反発の1日に依存していないか
+    md += ["", "## 買う日をずらしたとき（d=1 が本来のルール：翌営業日の始値）", "",
+           "| 買う日 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
+    o, h, c, cd = (q[k].to_numpy() for k in ("open", "high", "close", "code"))
+    for d in (1, 2, 3, 5):
+        w_, p_ = [], []
+        for i, code in zip(t.index.to_numpy(), t["code"].to_numpy()):
+            a, b = i + d, i + d + HOLD - 1
+            if b >= len(q) or cd[b] != code or not np.isfinite(o[a]) or o[a] <= 0:
+                continue
+            win_ = np.nanmax(h[a:b + 1]) >= o[a] * (1 + TP)
+            w_.append(win_)
+            p_.append(TP if win_ else c[b] / o[a] - 1)
+        md.append(f"| {d}営業日後 | {len(w_)} | {pct(float(np.mean(w_)) if w_ else None)} | {pct(float(np.mean(p_)) if p_ else None, 2)} |")
     # 独立した局面ごと：信号日の間が30暦日より空いたら別の局面とみなす（同じ局面の取引は独立な試行ではない）
     ds = t.sort_values("date")
     ep = (ds["date"].diff().dt.days.fillna(0) > 30).cumsum()
