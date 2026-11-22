@@ -499,7 +499,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     # 仮説(担当2 56周目)：日経225寄りの度合い＝日次騰落を TOPIX ETF の騰落と「日経225 ETF − TOPIX ETF」の騰落の差で
     # 2変数回帰したときの、差への60日の感応度（TOPIXの動きを除いた後も日経225と一緒に動く＝値がさ・先物の影響を受ける銘柄）。
     # 先物・指数の売りで一緒に売られた分は戻りやすいか。nt_dn5：日経225−TOPIX の5日累計の騰落差。ETF の t 終値で確定
-    q["nk_beta"] = q["nt_dn5"] = np.nan
+    q["nk_beta"] = q["nt_dn5"] = q["nk_beta120"] = np.nan
     _e_nk, _e_tp = _etf(q, ["1321", "13210"]), _etf(q, ["1306", "13060"])
     if _e_nk is not None and _e_tp is not None:
         _tr = _e_tp["close"].sort_index().pct_change()
@@ -512,7 +512,18 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         _den = (_vT * _vS - _cTS ** 2)
         q["nk_beta"] = ((_cRS * _vT - _cRT * _cTS) / _den.where(_den.abs() > 1e-14)).clip(-5, 5)
         q["nt_dn5"] = q["date"].map(_sr.rolling(5, min_periods=5).sum())
+        # 担当2 60周目：同じ感応度の120日版（手元8か月で 30日・60日・相関版のどれでも効き、120日が最も強かった）
+        def _r120(z):
+            return z.groupby(gc).transform(lambda w: w.rolling(120, min_periods=80).mean())
+        _mT, _mS, _mR = _r120(_T), _r120(_S), _r120(x1)
+        _cTS = _r120(_T * _S) - _mT * _mS
+        _vT, _vS = _r120(_T * _T) - _mT ** 2, _r120(_S * _S) - _mS ** 2
+        _cRT, _cRS = _r120(x1 * _T) - _mR * _mT, _r120(x1 * _S) - _mR * _mS
+        _den = (_vT * _vS - _cTS ** 2)
+        q["nk_beta120"] = ((_cRS * _vT - _cRT * _cTS) / _den.where(_den.abs() > 1e-14)).clip(-5, 5)
         del _T, _S, _mT, _mS, _mR, _cTS, _vT, _vS, _cRT, _cRS, _den
+    else:
+        q["nk_beta120"] = np.nan
     q["up_day_xs20"] = _rollc((x1 - m1).where((m1 > 0) & x1.notna()), 20, 5)
     # 仮説(53回目20周目 担当1)：下げた日の超過騰落の平均（下げの日に余計に売られたか）、上げの日−下げの日の差、
     # 業種内の up_day_xs20 の中央値（業種ぐるみで戻っていないか）と銘柄−業種の差
@@ -1595,6 +1606,7 @@ GRID = {
     "mg_long_d": [("<=", 2), (">=", 5)],
     "mkt_mg_chg4": [(">=", 0.05), ("<=", 0)],
     "nk_beta": [(">=", 1.0), (">=", 0.5), ("<=", 0)],
+    "nk_beta120": [(">=", 1.0), (">=", 0.5)],
     "nt_dn5": [("<=", -0.01), (">=", 0.01)],
     "mkt_rate_corr_chg": [(">=", 0.2), ("<=", -0.2)],
     "mkt_fx_corr60": [(">=", 0.4), (">=", 0.2), ("<=", 0)],
@@ -1782,7 +1794,7 @@ LABEL = {
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
     "bps_chg": "BPSの前回決算からの変化", "mkt_lo60_chg5": "市場全体の60日安値割合の5日変化", "sec_op_yoy": "業種内の営業利益の前年同期比(中央値)",
     "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
-    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "mkt_us_corr20": "日本市場全体と前夜の米国株の20日相関", "mkt_us_corr_chg": "日本市場と米国株の20日相関−60日相関", "disc_share": "20日の下げのうち決算発表後の反応の割合(発表なし=0)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "xsec_disp_pk10": "業種間のばらつきの直近10日の最大に対する位置(1=今日が山)", "xsec_disp_d4": "直近10日で業種間のばらつき≥4%の日数", "crash_sec_n": "同業種急落≥15%の業種の数(33業種中)", "crash_sec_chg5": "同業種急落≥15%の業種の数の5日変化", "mkt_rate_corr60": "市場全体と日本10年金利の変化の60日相関", "mkt_rate_corr_chg": "市場全体と金利の20日相関−60日相関", "mkt_fx_corr60": "市場全体とドル円の60日相関", "mkt_fx_corr_chg": "市場全体とドル円の20日相関−60日相関", "mg_ratio": "信用倍率(信用買い残/売り残・前週末)", "mg_long_chg4": "信用買い残の4週変化率", "mg_short_chg4": "信用売り残の4週変化率", "mg_long_d": "信用買い残が20日平均出来高の何日分か", "mkt_mg_chg4": "市場全体の信用買い残の4週変化(売買代金5億円以上の銘柄の中央値)", "nk_beta": "日経225寄りの度合い(TOPIXを除いた日経225−TOPIXの差への60日感応度)", "nt_dn5": "日経225−TOPIX(ETF)の5日累計の騰落差","sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
+    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "mkt_us_corr20": "日本市場全体と前夜の米国株の20日相関", "mkt_us_corr_chg": "日本市場と米国株の20日相関−60日相関", "disc_share": "20日の下げのうち決算発表後の反応の割合(発表なし=0)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "xsec_disp_pk10": "業種間のばらつきの直近10日の最大に対する位置(1=今日が山)", "xsec_disp_d4": "直近10日で業種間のばらつき≥4%の日数", "crash_sec_n": "同業種急落≥15%の業種の数(33業種中)", "crash_sec_chg5": "同業種急落≥15%の業種の数の5日変化", "mkt_rate_corr60": "市場全体と日本10年金利の変化の60日相関", "mkt_rate_corr_chg": "市場全体と金利の20日相関−60日相関", "mkt_fx_corr60": "市場全体とドル円の60日相関", "mkt_fx_corr_chg": "市場全体とドル円の20日相関−60日相関", "mg_ratio": "信用倍率(信用買い残/売り残・前週末)", "mg_long_chg4": "信用買い残の4週変化率", "mg_short_chg4": "信用売り残の4週変化率", "mg_long_d": "信用買い残が20日平均出来高の何日分か", "mkt_mg_chg4": "市場全体の信用買い残の4週変化(売買代金5億円以上の銘柄の中央値)", "nk_beta": "日経225寄りの度合い(TOPIXを除いた日経225−TOPIXの差への60日感応度)", "nt_dn5": "日経225−TOPIX(ETF)の5日累計の騰落差", "nk_beta120": "日経225寄りの度合い(120日)","sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
@@ -1825,7 +1837,7 @@ def fmt_cond(f, op, th):
         return "製造業" if op == ">=" else "非製造業"
     if f == "is_def":
         return "ディフェンシブ業種" if op == ">=" else "ディフェンシブ業種以外"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5", "sec_gap_frac", "sec_crash_hit", "bd_left", "up_vol5", "sec_cap_age", "sec_cap_days10", "mg_ratio", "mg_long_d", "nk_beta"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5", "sec_gap_frac", "sec_crash_hit", "bd_left", "up_vol5", "sec_cap_age", "sec_cap_days10", "mg_ratio", "mg_long_d", "nk_beta", "nk_beta120"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
