@@ -2202,11 +2202,40 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
     except Exception:
         seeds = []
     srows = []
+    # 担当3 18周目：seeds が採用されない理由（情報用。passes() と同じ順に判定するだけで、採用の判定には使わない）
+    try:
+        rch_ = evaluate(q, conds, edges)
+    except Exception:
+        rch_ = None
+
+    def _why(res_, ch_):
+        if res_["n"] < MIN_N:
+            return f"取引数{res_['n']}<{MIN_N}"
+        sp_ = res_["splits"]
+        lo_ = [str(i + 1) for i, x in enumerate(sp_) if x["n"] < MIN_N_SPLIT]
+        if lo_:
+            return "期間" + "・".join(lo_) + f"の件数<{MIN_N_SPLIT}"
+        if any(x["pnl"] is None or x["pnl"] <= 0 for x in sp_):
+            return "損益マイナスの期間あり"
+        if not ch_ or not ch_.get("splits"):
+            return "-"
+        if res_["win"] < ch_["win"] + 0.01:
+            return "勝率が採用ルール+1pt未満"
+        if min(x["win"] for x in sp_) <= min(x["win"] for x in ch_["splits"]):
+            return "最悪期間の勝率が採用ルール以下"
+        return "基準内"
     for s in seeds:
         cs = [list(c) for c in s.get("conds", [])]
         tt = dedup_trades(q, apply(q, cs))
         if len(tt) < 30:
             continue
+        spl_ = []
+        for a_, b_ in zip(edges[:-1], edges[1:]):
+            s_ = tt[(tt["date"] >= a_) & (tt["date"] < b_)]
+            spl_.append({"n": int(len(s_)), "win": float(s_["win"].mean()) if len(s_) else None,
+                         "pnl": float(s_["pnl"].mean()) if len(s_) else None})
+        spt_ = " / ".join(f"{x['n']}:{pct(x['win'])}" for x in spl_)
+        why_ = _why({"n": int(len(tt)), "win": float(tt["win"].mean()), "splits": spl_}, rch_)
         dd = pd.to_datetime(tt["date"]).sort_values()
         epn = int((dd.diff().dt.days.fillna(0) > 30).sum() + 1)
         wk = dd.dt.to_period("W").value_counts()
@@ -2222,16 +2251,16 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
             b5 = float(np.percentile(sw_[ix_].sum(1) / sn_[ix_].sum(1), 5))
         srows.append((tt["win"].mean(), len(tt), tt["pnl"].mean(), wk.size, wk.iloc[:3].sum() / len(tt), epn,
                       " かつ ".join(fmt_cond(*c) for c in cs), qw["mean"].mean(), len(qw),
-                      (qw5["mean"].min() if len(qw5) else None), b5))
+                      (qw5["mean"].min() if len(qw5) else None), b5, spt_, why_))
     if srows:
         srows.sort(key=lambda x: -x[0])
         md += ["", f"## seeds の局面集中（取引30件以上の {len(srows)} 個、勝率の高い順）", "",
                "（四半期の勝率＝取引のあった四半期を1つずつ等しく数えた勝率、最悪の四半期＝取引5件以上の四半期で最も低い勝率、"
                "信号日単位5%点＝信号日を単位にしたブートストラップ500回の勝率の5%点）", "",
-               "| 勝率 | 取引数 | 平均損益 | 週数 | 上位3週の割合 | 局面の数 | 四半期の勝率 | 四半期数 | 最悪の四半期 | 信号日単位5%点 | 条件 |",
-               "|---|---|---|---|---|---|---|---|---|---|---|"]
-        md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {pct(qm)} | {qn} | {pct(qmin)} | {pct(b5)} | {lbl} |"
-               for w, n, p, wkn, t3, e, lbl, qm, qn, qmin, b5 in srows]
+               "| 勝率 | 取引数 | 平均損益 | 週数 | 上位3週の割合 | 局面の数 | 四半期の勝率 | 四半期数 | 最悪の四半期 | 信号日単位5%点 | 条件 | 各期間(取引数:勝率) | 採用されない理由 |",
+               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {pct(qm)} | {qn} | {pct(qmin)} | {pct(b5)} | {lbl} | {spt} | {why} |"
+               for w, n, p, wkn, t3, e, lbl, qm, qn, qmin, b5, spt, why in srows]
     # 担当2が検証中の条件について、seeds からその条件を外した版との差（その条件の上乗せが5年分でもあるか）
     CHECK = ("disc_share", "mkt_us_corr20", "mkt_us_corr_chg", "mkt_corr_chg", "stop_lo5", "mkt_stop_lo", "xsec_disp_rel60", "xsec_disp_pk10", "xsec_disp_d4")
     crow = []
