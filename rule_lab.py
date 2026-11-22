@@ -176,6 +176,9 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         # 仮説(2026-11-22 29回目)：ドル円の20日ボラ（為替の不安定さ）・日本2年金利の20日変化（日銀の利上げ観測）
         x["fx_vol20"] = m["usdjpy"].pct_change().rolling(20, min_periods=15).std()
         x["jgb2y_chg20"] = m["jgb2y"] - m["jgb2y"].shift(20)
+        # 仮説(2026-11-22 43回目)：米国のグロース偏重（ナスダック-S&P500の5日騰落の差）・ドル円の60日平均からの乖離（円高・円安の水準）
+        x["ndx_spx5"] = m["nasdaq"].pct_change(5) - m["sp500"].pct_change(5)
+        x["usdjpy_dev60"] = m["usdjpy"] / m["usdjpy"].rolling(60, min_periods=40).mean() - 1
         # 日付 t には「t より前の日付」の値を使う
         x.index = x.index + pd.Timedelta(days=1)
         x = x[~x.index.duplicated(keep="last")]
@@ -694,6 +697,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     rmin = q.groupby("code", sort=False)["rsi14"].transform(lambda s: s.rolling(20, min_periods=20).min())
     q["rsi_div"] = (q["rsi14"] - rmin).where(q["close"] <= lo20c * 1.03)
     q = q.merge(q.groupby("date")["ret1"].median().rename("mkt_ret1"), on="date", how="left")
+    # 仮説(2026-11-22 43回目)：業種内の2日RSIの中央値（業種ぐるみの短期の売られすぎ）。t 終値時点で確定
+    q["sec_rsi2"] = q.groupby(["date", "sector"])["rsi2"].transform("median")
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -917,6 +922,9 @@ GRID = {
     "rsi2": [("<=", 5), ("<=", 15), (">=", 90)],
     "rsi_div": [(">=", 10), (">=", 5), ("<=", 1)],
     "mkt_ret1": [("<=", -0.02), ("<=", -0.01), (">=", 0.01)],
+    "ndx_spx5": [("<=", -0.015), ("<=", -0.005), (">=", 0.01)],
+    "usdjpy_dev60": [("<=", -0.03), ("<=", -0.01), (">=", 0.02)],
+    "sec_rsi2": [("<=", 10), ("<=", 25), (">=", 75)],
 }
 
 LABEL = {
@@ -995,6 +1003,7 @@ LABEL = {
     "ret20_xr": "20日騰落の全銘柄内の順位(0=最も下げた)", "sq_days": "次のSQ(第2金曜)までの暦日数", "div_days": "3月・9月末(配当の権利)までの暦日数",
     "sec_from_hi": "業種の52週高値からの位置(中央値)", "from_hi_rel": "52週高値からの位置-業種の中央値",
     "rsi2": "2日RSI", "rsi_div": "20日安値圏でのRSI14の20日最低からの戻り(強気ダイバージェンス)", "mkt_ret1": "市場全体のその日の騰落(中央値)",
+    "ndx_spx5": "ナスダック-S&P500の5日騰落の差(前日)", "usdjpy_dev60": "ドル円の60日平均からの乖離(前日)", "sec_rsi2": "業種内の2日RSIの中央値",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1030,7 +1039,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
