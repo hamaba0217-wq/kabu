@@ -792,6 +792,21 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     _pv = (q["close"] * q["volume"]).groupby(q["code"], sort=False).transform(lambda s: s.rolling(20, min_periods=20).sum())
     _vv = q["volume"].groupby(q["code"], sort=False).transform(lambda s: s.rolling(20, min_periods=20).sum())
     q["vwap_dev20"] = (q["close"] / (_pv / _vv) - 1).where(_vv > 0)
+    # 仮説(2026-11-22 51回目)：業種の投げ売りのピーク越え（業種内の60日安値割合−直近5日の最大値。マイナス=投げ売りが峠を越えた）・
+    # 市場全体のボラ拡大（全銘柄の前日比の中央値の5日標準偏差/60日標準偏差）・高値の連続切り下げ日数。すべて t 終値時点で確定
+    if "sec_lo60_frac" in q.columns and q["sec_lo60_frac"].notna().any():
+        _st = q[["date", "sector", "sec_lo60_frac"]].dropna().drop_duplicates(["date", "sector"]).sort_values("date")
+        _st["_pk5"] = _st.groupby("sector")["sec_lo60_frac"].transform(lambda s: s.rolling(5, min_periods=3).max())
+        _st = (_st["sec_lo60_frac"] - _st["_pk5"]).set_axis(pd.MultiIndex.from_frame(_st[["date", "sector"]]))
+        q["sec_lo60_off"] = pd.MultiIndex.from_frame(q[["date", "sector"]]).map(_st).astype(float)
+    else:
+        q["sec_lo60_off"] = np.nan
+    _m1 = q.groupby("date")["ret1"].median().sort_index()
+    _rvx = _m1.rolling(5, min_periods=5).std() / _m1.rolling(60, min_periods=40).std()
+    q["mkt_rv_exp"] = q["date"].map(_rvx)
+    _ph = q.groupby("code", sort=False)["high"].shift(1)
+    _lh = (q["high"] < _ph).astype(int)
+    q["lh_streak"] = _lh.groupby([q["code"], (_lh == 0).groupby(q["code"]).cumsum()]).cumsum()
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -1039,6 +1054,9 @@ GRID = {
     "prior_crash": [(">=", 1), ("<=", 0)],
     "eff20": [(">=", 0.5), (">=", 0.3), ("<=", 0.15)],
     "vwap_dev20": [("<=", -0.15), ("<=", -0.10), (">=", 0.05)],
+    "sec_lo60_off": [("<=", -0.1), ("<=", -0.05), (">=", 0)],
+    "mkt_rv_exp": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
+    "lh_streak": [(">=", 5), (">=", 3), ("<=", 0)],
 }
 
 LABEL = {
@@ -1126,7 +1144,7 @@ LABEL = {
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
-    "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離",
+    "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1148,7 +1166,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
@@ -1162,7 +1180,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
