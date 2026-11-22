@@ -1538,6 +1538,16 @@ def robustness_report(q, conds, edges, base, path=None):
         rest = t[~per.isin(set(mon.index[:k]))]
         md.append(f"- 上位{k}か月を除くと：取引数 {len(rest)} 勝率 {pct(rest['win'].mean() if len(rest) else None)} "
                   f"平均損益 {pct(rest['pnl'].mean() if len(rest) else None, 2)}")
+    # 独立した局面ごと：信号日の間が30暦日より空いたら別の局面とみなす（同じ局面の取引は独立な試行ではない）
+    ds = t.sort_values("date")
+    ep = (ds["date"].diff().dt.days.fillna(0) > 30).cumsum()
+    eps = ds.groupby(ep).agg(start=("date", "min"), end=("date", "max"), n=("win", "size"), win=("win", "mean"), pnl=("pnl", "mean"))
+    md += ["", "## 独立した局面ごと（信号日の間が30日より空いたら別の局面）", "",
+           f"- 局面の数 {len(eps)} ／ 局面を等しく数えた勝率 {pct(eps['win'].mean())} ／ 平均損益 {pct(eps['pnl'].mean(), 2)} ／ "
+           f"勝率50%未満の局面 {int((eps['win'] < 0.5).sum())}", "",
+           "| 開始 | 終了 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|---|"]
+    for r in eps.itertuples():
+        md.append(f"| {r.start.date()} | {r.end.date()} | {r.n} | {pct(r.win)} | {pct(r.pnl, 2)} |")
     # 銘柄の集中
     cc = t["code"].value_counts()
     md += ["", "## 銘柄の集中", "",
@@ -1584,6 +1594,27 @@ def robustness_report(q, conds, edges, base, path=None):
         md.append(f"| {fmt_cond(*cur[i])} | {len(cs)} | {r.get('n', 0)} | {weeks(cs)} | {pct(r.get('win'))} | {pct(r.get('pnl'), 2)} | "
                   + " / ".join(f"{s['n']}:{pct(s['win'])}" for s in r.get("splits") or []) + " |")
         cur = cs
+    # seeds の局面集中（勝率が高くても少数の局面に偏っていないか）
+    try:
+        seeds = json.load(open(os.path.join("rules", "seeds.json"), encoding="utf-8")).get("seeds", [])
+    except Exception:
+        seeds = []
+    srows = []
+    for s in seeds:
+        cs = [list(c) for c in s.get("conds", [])]
+        tt = dedup_trades(q, apply(q, cs))
+        if len(tt) < 30:
+            continue
+        dd = pd.to_datetime(tt["date"]).sort_values()
+        epn = int((dd.diff().dt.days.fillna(0) > 30).sum() + 1)
+        wk = dd.dt.to_period("W").value_counts()
+        srows.append((tt["win"].mean(), len(tt), tt["pnl"].mean(), wk.size, wk.iloc[:3].sum() / len(tt), epn,
+                      " かつ ".join(fmt_cond(*c) for c in cs)))
+    if srows:
+        srows.sort(key=lambda x: -x[0])
+        md += ["", f"## seeds の局面集中（取引30件以上の {len(srows)} 個、勝率の高い順）", "",
+               "| 勝率 | 取引数 | 平均損益 | 週数 | 上位3週の割合 | 局面の数 | 条件 |", "|---|---|---|---|---|---|---|"]
+        md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {lbl} |" for w, n, p, wkn, t3, e, lbl in srows]
     _write_keep_manual(path, md)
 
 
