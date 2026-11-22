@@ -627,6 +627,11 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     # 業種内での20日騰落の順位（0=業種で最も下げた銘柄）・直近5日で下ヒゲ≥2%をつけた日数（下値での買い支え）。t 終値時点で確定
     mix = (1 + md1.fillna(0)).cumprod()
     q = q.merge((mix / mix.rolling(60, min_periods=40).max() - 1).rename("mkt_dd60"), on="date", how="left")
+    # 仮説(2026-11-22 担当2)：市場全体の下げが続いている長さ＝同じ指数の120日高値からの経過営業日数と120日高値からの下落
+    # （数日の急落か、何か月も続く下げ相場か。採用ルールの弱点＝長い下げ相場が検証期間にほぼ無い点の確認用）。t 終値時点で確定
+    _amax = mix.rolling(120, min_periods=60).apply(lambda a: len(a) - 1 - int(np.argmax(a)), raw=True)
+    q = q.merge(_amax.rename("mkt_hi_days"), on="date", how="left")
+    q = q.merge((mix / mix.rolling(120, min_periods=60).max() - 1).rename("mkt_dd120"), on="date", how="left")
     q["sec_rank20"] = q.groupby(["date", "sector"])["ret20"].rank(pct=True) if "sector" in q.columns else np.nan
     q["hammer5"] = (q["shadow_lo"] >= 0.02).astype(float).where(q["shadow_lo"].notna()).groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=5).sum())
     # 仮説(2026-11-22 28回目)：日次リターンの20日の1次自己相関（負＝行き過ぎが戻りやすい銘柄）・株価の水準（低位株は%で動きやすい）・
@@ -1119,6 +1124,8 @@ GRID = {
     "sec_rel5":  [("<=", -0.05), ("<=", -0.02), (">=", 0.03)],
     # 仮説(2026-11-22 27回目)：日本の市場全体の60日高値からの下落・業種内の20日騰落の順位・直近5日の下ヒゲの日数
     "mkt_dd60":  [("<=", -0.10), ("<=", -0.05), (">=", -0.01)],
+    "mkt_hi_days": [("<=", 10), ("<=", 30), (">=", 60)],
+    "mkt_dd120": [("<=", -0.15), ("<=", -0.10), (">=", -0.03)],
     "sec_rank20": [("<=", 0.1), ("<=", 0.25), (">=", 0.75)],
     "hammer5":   [(">=", 3), (">=", 2), ("<=", 0)],
     # 仮説(2026-11-22 28回目)：日次リターンの自己相関・株価の水準・直近5日の引け位置の平均
@@ -1287,7 +1294,7 @@ LABEL = {
     "lo_days60": "60日安値からの経過日数",
     "mkt_dn_streak": "市場全体の連続下落日数(前日比の中央値)", "mkt_lo60_frac": "60日安値をつけた銘柄の割合(市場全体)",
     "sec_rel5": "業種の5日騰落-市場全体の5日騰落",
-    "mkt_dd60": "日本の市場全体の60日高値からの下落(中央値指数)", "sec_rank20": "業種内の20日騰落の順位(0=最も下げた)",
+    "mkt_dd60": "日本の市場全体の60日高値からの下落(中央値指数)", "mkt_hi_days": "市場全体の120日高値からの経過日数(下げ相場の長さ)", "mkt_dd120": "市場全体の120日高値からの下落(中央値指数)", "sec_rank20": "業種内の20日騰落の順位(0=最も下げた)",
     "hammer5": "直近5日で下ヒゲ≥2%の日数",
     "ac20": "日次リターンの20日自己相関", "px_lvl": "株価の水準(円)", "clpos5": "直近5日の引け位置の平均",
     "opm_chg": "営業利益率の前年同期比の変化(直近の決算)", "fx_vol20": "ドル円の20日ボラ(日次・前日)",
@@ -1345,7 +1352,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak", "stop_lo5", "stop_hi20"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak", "stop_lo5", "stop_hi20", "mkt_hi_days"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
@@ -1667,6 +1674,18 @@ def robustness_report(q, conds, edges, base, path=None):
         _, bw, _ = sim(bt, hold=hold_, tp=tp_)
         md.append(f"| +{tp_*100:.0f}% | {hold_}日 | {n_} | {pct(w_)} | {pct(p_, 2)} | {pct(bw)} | "
                   f"{(w_ - bw) * 100:+.1f}pt |" if w_ is not None and bw is not None else f"| +{tp_*100:.0f}% | {hold_}日 | {n_} | - | - | - | - |")
+    # 相場の状態別：市場全体の下げの長さ・深さで分けた成績（長い下げ相場でも効くか）
+    md += ["", "## 相場の状態別（市場全体の下げの長さ・深さ）", "", "| 区分 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
+    for f_, cuts, unit in (("mkt_hi_days", [-1, 10, 30, 60, 1e9], "日"), ("mkt_dd120", [-1, -0.2, -0.1, -0.05, 1], ""),
+                           ("mkt_dd60", [-1, -0.15, -0.10, -0.05, 1], "")):
+        if f_ not in q.columns:
+            continue
+        v_ = q.loc[t.index, f_]
+        for lo_, hi_ in zip(cuts[:-1], cuts[1:]):
+            g_ = t[(v_ > lo_) & (v_ <= hi_)]
+            if len(g_):
+                rng_ = (f"{lo_ + 1:g}〜{hi_:g}{unit}" if unit else f"{lo_*100:+.0f}%〜{hi_*100:+.0f}%").replace("1e+09", "")
+                md.append(f"| {LABEL.get(f_, f_)} {rng_} | {len(g_)} | {pct(g_['win'].mean())} | {pct(g_['pnl'].mean(), 2)} |")
     # 独立した局面ごと：信号日の間が30暦日より空いたら別の局面とみなす（同じ局面の取引は独立な試行ではない）
     ds = t.sort_values("date")
     ep = (ds["date"].diff().dt.days.fillna(0) > 30).cumsum()
