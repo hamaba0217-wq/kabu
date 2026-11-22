@@ -82,6 +82,12 @@ def main():
     ok_q = grow("raw_quotes", jq.raw_quotes, _norm_q, ["code", "date"])
     if ok_q:
         grow("fin", jq.raw_fin, jq._normalize_fin, ["code", "disclosed_date"])
+        # 担当2(51周目)：信用取引週末残高（銘柄別・週次。J-Quants の公式データ）。失敗しても株価・ルール探索は止めない
+        # （取得状態 fetch_status は株価だけで決める。途中までなら rule_lab では残りが欠損になるだけ）
+        try:
+            grow("margin", jq.raw_margin, jq._normalize_margin, ["code", "date"])
+        except (Exception, SystemExit) as e:
+            print("margin error", e)
     try:
         if cache.load("listed") is None or ok_q:
             jq.listed(use_cache=True)

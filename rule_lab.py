@@ -276,6 +276,34 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             q = q.drop(columns=["last_disc"])
     except Exception as e:
         print(f"[警告] 決算日データなし: {e}")
+    # 仮説(担当2 51周目)：信用取引週末残高（需給）。急落中に個人が買い増した（信用買い残が増えた）銘柄は戻りの重し、
+    # 投げ・追証で買い残が減った銘柄は戻りやすい。週末（金曜）基準の残高は通常2営業日後（火曜）に公表されるが、
+    # 連休の週（GW など）は翌週金曜の公表になるため、先読みを避けて基準日+7日から使う
+    q["mg_ratio"] = q["mg_long_chg4"] = q["mg_short_chg4"] = q["mg_long_d"] = np.nan
+    try:
+        import cache
+        mg = cache.load("margin")
+        if mg is not None and {"code", "date", "long_margin", "short_margin"} <= set(mg.columns):
+            mg = mg[["code", "date", "long_margin", "short_margin"]].dropna(subset=["date"]).copy()
+            mg["code"] = mg["code"].astype(str)
+            mg["date"] = pd.to_datetime(mg["date"])
+            mg = mg.drop_duplicates(["code", "date"]).sort_values(["code", "date"])
+            mg["_l4"] = mg.groupby("code")["long_margin"].shift(4)
+            mg["_s4"] = mg.groupby("code")["short_margin"].shift(4)
+            mg["_avail"] = mg["date"] + pd.Timedelta(days=7)
+            mg = mg.drop(columns=["date"]).sort_values("_avail")
+            q = q.drop(columns=["mg_ratio", "mg_long_chg4", "mg_short_chg4", "mg_long_d"]).sort_values("date")
+            q = pd.merge_asof(q, mg, left_on="date", right_on="_avail", by="code", direction="backward",
+                              tolerance=pd.Timedelta(days=14))
+            q = q.sort_values(["code", "date"]).reset_index(drop=True)
+            _v20 = q.groupby("code", sort=False)["volume"].transform(lambda s: s.rolling(20, min_periods=10).mean())
+            q["mg_ratio"] = q["long_margin"] / q["short_margin"].where(q["short_margin"] > 0)
+            q["mg_long_chg4"] = q["long_margin"] / q["_l4"].where(q["_l4"] > 0) - 1
+            q["mg_short_chg4"] = q["short_margin"] / q["_s4"].where(q["_s4"] > 0) - 1
+            q["mg_long_d"] = q["long_margin"] / _v20.where(_v20 > 0)
+            q = q.drop(columns=["long_margin", "short_margin", "_l4", "_s4", "_avail"])
+    except Exception as e:
+        print(f"[警告] 信用残データなし: {e}")
     # 仮説(2026-11-21 7回目)：PBR・会社予想（営業利益）の修正率（発表日当日までに開示された値のみ）
     try:
         import cache
@@ -1529,6 +1557,11 @@ GRID = {
     "crash_sec_n": [(">=", 10), (">=", 5), ("<=", 2)],
     "crash_sec_chg5": [(">=", 5), (">=", 2), ("<=", 0)],
     "mkt_rate_corr60": [(">=", 0.2), ("<=", -0.2), ("<=", 0)],
+    # 担当2 51周目：信用残（需給）
+    "mg_ratio": [(">=", 10), (">=", 5), ("<=", 2)],
+    "mg_long_chg4": [("<=", 0), ("<=", -0.1), (">=", 0.3)],
+    "mg_short_chg4": [(">=", 0.5), ("<=", 0)],
+    "mg_long_d": [("<=", 2), (">=", 5)],
     "mkt_rate_corr_chg": [(">=", 0.2), ("<=", -0.2)],
     "mkt_fx_corr60": [(">=", 0.4), (">=", 0.2), ("<=", 0)],
     "mkt_fx_corr_chg": [(">=", 0.2), ("<=", -0.2)],
@@ -1714,7 +1747,7 @@ LABEL = {
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
     "bps_chg": "BPSの前回決算からの変化", "mkt_lo60_chg5": "市場全体の60日安値割合の5日変化", "sec_op_yoy": "業種内の営業利益の前年同期比(中央値)",
     "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
-    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "mkt_us_corr20": "日本市場全体と前夜の米国株の20日相関", "mkt_us_corr_chg": "日本市場と米国株の20日相関−60日相関", "disc_share": "20日の下げのうち決算発表後の反応の割合(発表なし=0)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "xsec_disp_pk10": "業種間のばらつきの直近10日の最大に対する位置(1=今日が山)", "xsec_disp_d4": "直近10日で業種間のばらつき≥4%の日数", "crash_sec_n": "同業種急落≥15%の業種の数(33業種中)", "crash_sec_chg5": "同業種急落≥15%の業種の数の5日変化", "mkt_rate_corr60": "市場全体と日本10年金利の変化の60日相関", "mkt_rate_corr_chg": "市場全体と金利の20日相関−60日相関", "mkt_fx_corr60": "市場全体とドル円の60日相関", "mkt_fx_corr_chg": "市場全体とドル円の20日相関−60日相関","sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
+    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "mkt_us_corr20": "日本市場全体と前夜の米国株の20日相関", "mkt_us_corr_chg": "日本市場と米国株の20日相関−60日相関", "disc_share": "20日の下げのうち決算発表後の反応の割合(発表なし=0)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "xsec_disp_pk10": "業種間のばらつきの直近10日の最大に対する位置(1=今日が山)", "xsec_disp_d4": "直近10日で業種間のばらつき≥4%の日数", "crash_sec_n": "同業種急落≥15%の業種の数(33業種中)", "crash_sec_chg5": "同業種急落≥15%の業種の数の5日変化", "mkt_rate_corr60": "市場全体と日本10年金利の変化の60日相関", "mkt_rate_corr_chg": "市場全体と金利の20日相関−60日相関", "mkt_fx_corr60": "市場全体とドル円の60日相関", "mkt_fx_corr_chg": "市場全体とドル円の20日相関−60日相関", "mg_ratio": "信用倍率(信用買い残/売り残・前週末)", "mg_long_chg4": "信用買い残の4週変化率", "mg_short_chg4": "信用売り残の4週変化率", "mg_long_d": "信用買い残が20日平均出来高の何日分か","sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
@@ -1757,7 +1790,7 @@ def fmt_cond(f, op, th):
         return "製造業" if op == ">=" else "非製造業"
     if f == "is_def":
         return "ディフェンシブ業種" if op == ">=" else "ディフェンシブ業種以外"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5", "sec_gap_frac", "sec_crash_hit", "bd_left", "up_vol5", "sec_cap_age", "sec_cap_days10"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5", "sec_gap_frac", "sec_crash_hit", "bd_left", "up_vol5", "sec_cap_age", "sec_cap_days10", "mg_ratio", "mg_long_d"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
@@ -2462,7 +2495,7 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
         md += ["", f"（速報の期間を除いた成績の集計は失敗：{e}）"]
     # 担当2が検証中の条件について、seeds からその条件を外した版との差（その条件の上乗せが5年分でもあるか）
     CHECK = ("disc_share", "mkt_us_corr20", "mkt_us_corr_chg", "mkt_corr_chg", "stop_lo5", "mkt_stop_lo", "xsec_disp_rel60", "xsec_disp_pk10", "xsec_disp_d4",
-             "sec_cap_pk5", "mkt_rate_corr60", "mkt_rate_corr_chg", "mkt_fx_corr_chg")   # 担当2 48周目：担当1の業種の投げ売り・担当2の金利相関
+             "sec_cap_pk5", "mkt_rate_corr60", "mkt_rate_corr_chg", "mkt_fx_corr_chg", "mg_ratio", "mg_long_chg4")   # 担当2 48周目：担当1の業種の投げ売り・担当2の金利相関
     crow = []
     for s in seeds:
         cs = [list(c) for c in s.get("conds", [])]
