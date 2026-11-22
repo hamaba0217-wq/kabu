@@ -1545,6 +1545,28 @@ def robustness_report(q, conds, edges, base, path=None):
         for v in _shift_variants(f, op, th):
             cs = conds[:i] + [[f, op, v]] + conds[i + 1:]
             md.append(row(f"{fmt_cond(f, op, th)} → {fmt_cond(f, op, v)}", evaluate(q, cs, edges)))
+    # 条件を減らした簡単な版：外しても勝率が最も下がらない条件から順に1つずつ外していく（どの条件が勝率を支えているか）
+    def weeks(cs):
+        tt = dedup_trades(q, apply(q, cs))
+        return int(pd.to_datetime(tt["date"]).dt.to_period("W").nunique()) if len(tt) else 0
+    md += ["", "## 条件を減らした簡単な版（勝率への影響が小さい条件から順に外す）", "",
+           "| 外した条件（累積） | 残りの条件数 | 取引数 | 取引のあった週 | 勝率 | 平均損益 | 各期間(取引数:勝率) |",
+           "|---|---|---|---|---|---|---|"]
+    cur = list(conds)
+    r0 = evaluate(q, cur, edges)
+    md.append(f"| （元のルール） | {len(cur)} | {r0.get('n', 0)} | {weeks(cur)} | {pct(r0.get('win'))} | {pct(r0.get('pnl'), 2)} | "
+              + " / ".join(f"{s['n']}:{pct(s['win'])}" for s in r0.get("splits") or []) + " |")
+    while len(cur) > 1:
+        best = None
+        for i in range(len(cur)):
+            cs = cur[:i] + cur[i + 1:]
+            r = evaluate(q, cs, edges)
+            if best is None or (r.get("win") or 0) > (best[1].get("win") or 0):
+                best = (i, r, cs)
+        i, r, cs = best
+        md.append(f"| {fmt_cond(*cur[i])} | {len(cs)} | {r.get('n', 0)} | {weeks(cs)} | {pct(r.get('win'))} | {pct(r.get('pnl'), 2)} | "
+                  + " / ".join(f"{s['n']}:{pct(s['win'])}" for s in r.get("splits") or []) + " |")
+        cur = cs
     _write_keep_manual(path, md)
 
 
