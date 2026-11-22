@@ -117,6 +117,13 @@ def _etf(q, codes):
     return pd.DataFrame({"close": s["close"], "tv": tv})
 
 
+def _shrink(q: pd.DataFrame) -> pd.DataFrame:
+    """メモリ節約：小数の列を float32 に（5年分×多数の要因で GitHub のサーバーのメモリ16GBを超えないように）"""
+    for c in q.columns[q.dtypes == "float64"]:
+        q[c] = q[c].astype("float32")
+    return q
+
+
 def add_context(q: pd.DataFrame) -> pd.DataFrame:
     """相場全体・投資家心理・外部要因（金/国債/金利/為替/米株/原油/VIX）・季節性・決算タイミング"""
     dates = pd.DatetimeIndex(sorted(q["date"].unique()))
@@ -564,7 +571,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     # 仮説(2026-11-21 13回目)：相場全体の短期の急落（全銘柄の5日騰落の中央値）
     mk5 = q.groupby("date")["ret5"].median().rename("mkt5")
     q = q.merge(mk5, on="date", how="left")
-    q = add_context(q)
+    q = _shrink(q)
+    q = _shrink(add_context(q))
     # 仮説(2026-11-21 20回目4周目)：日本株だけが売られた度合い＝市場全体の5日騰落(中央値) − 米国株(S&P500)の5日騰落(前日)
     q["jp_rel5"] = q["mkt5"] - q["sp500_ret5"] if "sp500_ret5" in q.columns else np.nan
     # 仮説(2026-11-22 26回目2周目)：市場全体の連続下落日数（全銘柄の前日比の中央値がマイナスの日の連続）・
@@ -788,7 +796,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q.loc[q["fclose"].isna() | q["buy"].isna(), ["win", "pnl", "dd10"]] = np.nan
     # 仮説(2026-11-21 17回目)：その銘柄の過去の+10%到達のしやすさ＝t-20 日以前に買った場合の勝ち（t 終値までに確定済み）の60日平均
     q["hit_hist"] = q.groupby("code", sort=False)["win"].transform(lambda s: s.shift(HOLD).rolling(60, min_periods=40).mean())
-    return q
+    return _shrink(q)
 
 
 # --------------------------------------------------------------------------
