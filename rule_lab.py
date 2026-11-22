@@ -1826,6 +1826,22 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
     for d in (1, 2, 3, 5):
         n_, w_, p_ = sim(t, d=d)
         md.append(f"| {d}営業日後 | {n_} | {pct(w_)} | {pct(p_, 2)} |")
+    # 担当2(35周目)：翌朝の寄り付きの窓（信号日の終値→翌日の始値）別の成績。翌朝の値は判定日 t には分からないので
+    # 条件には使えない（情報用）。「大きく上に寄ったら見送る」ような実際の買い方の目安になるかを見る
+    try:
+        _gp = []
+        for i, code in zip(t.index.to_numpy(), t["code"].to_numpy()):
+            _gp.append(o[i + 1] / c[i] - 1 if i + 1 < len(q) and cd[i + 1] == code and c[i] > 0 else np.nan)
+        _gp = pd.Series(_gp, index=t.index)
+        md += ["", "## 翌朝の寄り付きの窓別（信号日の終値→翌日の始値。情報用：判定日には分からない値）", "",
+               "| 翌朝の窓 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
+        for lbl_, lo_, hi_ in (("-3%以下", -9, -0.03), ("-3%〜-1%", -0.03, -0.01), ("-1%〜+1%", -0.01, 0.01),
+                               ("+1%〜+3%", 0.01, 0.03), ("+3%〜+5%", 0.03, 0.05), ("+5%以上", 0.05, 9)):
+            g_ = t[(_gp > lo_) & (_gp <= hi_)]
+            if len(g_):
+                md.append(f"| {lbl_} | {len(g_)} | {pct(g_['win'].mean())} | {pct(g_['pnl'].mean(), 2)} |")
+    except Exception as e:
+        md += ["", f"（翌朝の窓別の集計は失敗：{e}）"]
     # 勝ちの定義を少し変えたとき（情報用。採用に使う定義は +10%・20営業日のまま）。基準（流動性のみ）も同じ定義で比べる
     bt = dedup_trades(q, apply(q, []))
     md += ["", "## 勝ちの定義を少し変えたとき（情報用。本来は +10%・20営業日）", "",
