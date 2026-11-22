@@ -267,6 +267,24 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     _pv = np.where(_k > 0, _ix - _fp[np.maximum(_k - 1, 0)], np.nan)
     ctx["fomc_next"] = _nx
     ctx["fomc_prev"] = np.where(_pv > 70, np.nan, _pv)
+    # 仮説(2026-11-23 担当1 52周目)：日銀の金融政策決定会合の結果が出るまで・出てからの営業日数（FOMC と同じ「予定された政策イベント」。
+    # 日銀が事前に公表する定例会合の最終日のみ。2020-03-16・2020-05-22 の臨時会合は除外。結果は最終日の日中に公表＝その日の終値で判明）
+    _boj = pd.to_datetime([
+        "2019-01-23", "2019-03-15", "2019-04-25", "2019-06-20", "2019-07-30", "2019-09-19", "2019-10-31", "2019-12-19",
+        "2020-01-21", "2020-04-27", "2020-06-16", "2020-07-15", "2020-09-17", "2020-10-29", "2020-12-18",
+        "2021-01-21", "2021-03-19", "2021-04-27", "2021-06-18", "2021-07-16", "2021-09-22", "2021-10-28", "2021-12-17",
+        "2022-01-18", "2022-03-18", "2022-04-28", "2022-06-17", "2022-07-21", "2022-09-22", "2022-10-28", "2022-12-20",
+        "2023-01-18", "2023-03-10", "2023-04-28", "2023-06-16", "2023-07-28", "2023-09-22", "2023-10-31", "2023-12-19",
+        "2024-01-23", "2024-03-19", "2024-04-26", "2024-06-14", "2024-07-31", "2024-09-20", "2024-10-31", "2024-12-19",
+        "2025-01-24", "2025-03-19", "2025-05-01", "2025-06-17", "2025-07-31", "2025-09-19", "2025-10-30", "2025-12-19",
+        "2026-01-23", "2026-03-19", "2026-04-28", "2026-06-16", "2026-07-31", "2026-09-18", "2026-10-30", "2026-12-18"])
+    _bp = np.unique(np.searchsorted(dates.values, _boj.values))      # 結果が出た日（その日の終値で判明）の位置
+    _k = np.searchsorted(_bp, _ix, side="left")                      # _bp[_k] は t 以後の最初の結果の日
+    _k2 = np.searchsorted(_bp, _ix, side="right")
+    _nx = np.where(_k2 < len(_bp), _bp[np.minimum(_k2, len(_bp) - 1)] - _ix, np.nan)   # t より後の次の結果まで
+    ctx["boj_next"] = np.where(_nx > 70, np.nan, _nx)
+    _pv = np.where(_k2 > 0, _ix - _bp[np.maximum(_k2 - 1, 0)], np.nan)                  # 0＝当日に結果が出た
+    ctx["boj_prev"] = np.where(_pv > 70, np.nan, _pv)
     # 仮説(2026-11-22 41回目)：SQ（毎月第2金曜）までの暦日数＝需給の節目、3月・9月末（配当の権利付き最終日）までの暦日数＝
     # 保有期間中に権利落ちを含むか。どちらも暦で事前に決まっているので先読みではない
     def _sq(y, mth):
@@ -1745,6 +1763,8 @@ GRID = {
     "cu_au20": [("<=", 0.0), (">=", 0.05)],
     "fomc_next": [("<=", 3), ("<=", 5), (">=", 15)],
     "fomc_prev": [("<=", 3), ("<=", 5)],
+    "boj_next": [("<=", 3), ("<=", 5), (">=", 15)],
+    "boj_prev": [("<=", 2), ("<=", 5)],
 }
 
 LABEL = {
@@ -1756,6 +1776,7 @@ LABEL = {
     "mkt20": "市場全体の20日騰落(中央値)", "close": "株価",
     "breadth": "値上がり銘柄の割合", "adr25": "騰落レシオ(25日)",
     "lev_z": "個人の強気度(レバETF/インバETF売買代金の偏差)", "rel_sec20": "業種平均に対する20日騰落の差",
+    "boj_next": "日銀の金融政策決定会合の結果が出るまでの営業日数", "boj_prev": "日銀の金融政策決定会合の結果が出てからの営業日数(0=当日)",
     "fomc_next": "FOMCの結果が判明するまでの営業日数", "fomc_prev": "FOMCの結果が判明してからの営業日数",
     "cu_ret20": "銅(ETF)の20日騰落", "cu_ret5": "銅(ETF)の5日騰落", "cu_au20": "銅/金の比の20日変化(対数)",
     "gold_ret20": "金(ETF)の20日騰落", "bond_ret20": "国債ETFの20日騰落", "reit_ret20": "REIT(ETF)の20日騰落",
@@ -1873,7 +1894,7 @@ def fmt_cond(f, op, th):
         return "製造業" if op == ">=" else "非製造業"
     if f == "is_def":
         return "ディフェンシブ業種" if op == ">=" else "ディフェンシブ業種以外"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5", "sec_gap_frac", "sec_crash_hit", "bd_left", "up_vol5", "sec_cap_age", "sec_cap_days10", "mg_ratio", "mg_long_d", "nk_beta", "nk_beta120", "fomc_next", "fomc_prev"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5", "sec_gap_frac", "sec_crash_hit", "bd_left", "up_vol5", "sec_cap_age", "sec_cap_days10", "mg_ratio", "mg_long_d", "nk_beta", "nk_beta120", "fomc_next", "fomc_prev", "boj_next", "boj_prev"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
