@@ -92,7 +92,7 @@ def load_data(fetch: bool) -> pd.DataFrame:
             m = lst[[cc, sc]].drop_duplicates(cc)
             m.columns = ["code", "sector"]
             m["code"] = m["code"].astype(str)
-            q = q.merge(m, on="code", how="left")
+            q = _ljoin(q, m, on="code", how="left")
     if "sector" not in q.columns:
         q["sector"] = "不明"
     q["sector"] = q["sector"].fillna("不明")
@@ -121,6 +121,38 @@ def _map_ds(q: pd.DataFrame, s: pd.Series) -> np.ndarray:
     """(日付, 業種) で引ける値を各行に割り当てる（q.merge と同じ結果。5年分の大きな表を複製しないのでメモリを使わない）"""
     s = s[~s.index.duplicated()]
     return s.reindex(pd.MultiIndex.from_arrays([q["date"], q["sector"]])).to_numpy().astype("float32")
+
+
+def _ljoin(q: pd.DataFrame, right, on, how: str = "left") -> pd.DataFrame:
+    """q.merge(right, on=on, how="left") と同じ結果を、表全体を複製せずに作る（Actions のメモリ16GB対策・2026-11-23 担当1）。
+    右側のキーが重複する・列名がぶつかる・left 以外のときは通常の merge に戻す。"""
+    keys = [on] if isinstance(on, str) else list(on)
+    r = right.to_frame() if isinstance(right, pd.Series) else right
+    if how != "left" or not all(k in r.columns for k in keys):
+        if how == "left" and isinstance(r, pd.DataFrame) and all(k in r.index.names for k in keys):
+            r = r.reset_index()
+        else:
+            return q.merge(right, on=on, how=how)
+    vals = [c for c in r.columns if c not in keys]
+    if any(c in q.columns for c in vals) or r.duplicated(keys).any() or not isinstance(q.index, pd.RangeIndex) or q.index.start != 0 or q.index.step != 1:
+        return q.merge(right, on=on, how=how)
+    r = r.set_index(keys)
+    idx = pd.Index(q[keys[0]]) if len(keys) == 1 else pd.MultiIndex.from_arrays([q[k] for k in keys])
+    try:
+        pos = r.index.get_indexer(idx)
+    except Exception:
+        return q.merge(right, on=on, how=how)
+    hit = pos >= 0
+    new = {}
+    for c in vals:
+        col = r[c]
+        if hit.all():
+            new[c] = col.to_numpy()[pos]
+        else:
+            new[c] = col.reindex(idx).to_numpy()
+    for c, v in new.items():
+        q[c] = v
+    return q
 
 
 def _shrink(q: pd.DataFrame) -> pd.DataFrame:
@@ -311,7 +343,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     ctx["sq_days"] = sqd
     ctx["div_days"] = dvd
     ctx.index.name = "date"
-    q = q.merge(ctx.reset_index(), on="date", how="left")
+    q = _ljoin(q, ctx.reset_index(), on="date", how="left")
     # --- 業種内での相対的な強さ ---
     sec = q.groupby(["date", "sector"])["ret20"].transform("median")
     q["rel_sec20"] = q["ret20"] - sec
@@ -506,7 +538,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     # 仮説(2026-11-21 10回目)：業種内の20日騰落のばらつき・業種の勢いの変化（20日前の業種騰落との差）
     q["sec_disp20"] = q.groupby(["date", "sector"])["ret20"].transform("std")
     sd = q.groupby(["sector", "date"])["sec20"].first().groupby(level=0).shift(20).rename("sec20_prev").reset_index()
-    q = q.merge(sd, on=["sector", "date"], how="left")
+    q = _ljoin(q, sd, on=["sector", "date"], how="left")
     q["sec_turn"] = q["sec20"] - q["sec20_prev"]
     # 仮説(2026-11-21 20回目)：業種ぐるみの急落＝同じ業種で20日騰落が-15%以下の銘柄の割合
     # 仮説(2026-11-21 20回目2周目)：業種全体のその日の騰落（中央値）＝業種の反発初日・続落
@@ -521,7 +553,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     scmax = scg.transform(lambda z: z.rolling(20, min_periods=10).max())
     sc = pd.DataFrame({"sec_crash_chg5": scs - scg.shift(5),
                        "sec_crash_pk": scs / scmax.replace(0, np.nan)}).reset_index()
-    q = q.merge(sc, on=["sector", "date"], how="left")
+    q = _ljoin(q, sc, on=["sector", "date"], how="left")
     # 仮説(2026-11-21 22回目4周目)：急落が広がった業種の割合（同業種の急落割合≥15%の業種数/全業種数）＝相場全体の売られ方の広さ
     q["sec_wide"] = (scs >= 0.15).astype(float).where(scs.notna()).groupby(level=1).mean().reindex(q["date"]).values
     # 仮説(2026-11-21 22回目)：業種の大型株（時価総額上位3銘柄）の5日騰落の平均＝業種の主力株が先に戻り始めたか
@@ -747,7 +779,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["rev_up"] = ((c > ph) & (g["close"].shift(1) < g["close"].shift(2))).astype(float).where(ph.notna())
     # 仮説(2026-11-21 15回目)：市場全体の荒れ具合＝その日の全銘柄の騰落のばらつき（標準偏差）の5日平均
     xd = q.groupby("date")["ret1"].std().sort_index().rolling(5, min_periods=5).mean().rename("xs_disp5")
-    q = q.merge(xd, on="date", how="left")
+    q = _ljoin(q, xd, on="date", how="left")
     # 仮説(2026-11-21 18回目)：個別の窓＝その銘柄の当日の窓 − 全銘柄の窓の中央値（市場要因を除いた寄り付きの売られ方）
     q["xs_gap"] = q["gap"] - q.groupby("date")["gap"].transform("median")
     # 仮説(2026-11-21 19回目2周目)：市場全体の窓（全銘柄の窓の中央値＝寄り付きの一斉の売り/買い）・52週安値を終値で割り込み
@@ -780,7 +812,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     am = (q["ret1"].abs() / (tv / 1e8).replace(0, np.nan))
     q["illiq20"] = am.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=15).mean())
     xsk = q.groupby("date")["ret5"].skew().rename("xs_skew5")
-    q = q.merge(xsk, on="date", how="left")
+    q = _ljoin(q, xsk, on="date", how="left")
     # 仮説(2026-11-22 26回目)：ボラで割った下げの深さ（20日騰落/(60日の日次ボラ×√20)＝その銘柄にとって異例の下げか）・
     # 窓を開けて下げた日の日中の戻り（(終値-始値)/(前日終値-始値)、窓≤-2%のみ）・60日安値からの経過日数。すべて t 終値時点で確定
     sd60b = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(60, min_periods=40).std())
@@ -790,10 +822,10 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["lo_days60"] = q.groupby("code", sort=False)["low"].transform(lambda s: s.rolling(60, min_periods=40).apply(lambda a: len(a) - 1 - np.argmin(a), raw=True))
     # 市場全体（全銘柄の20日騰落の中央値＝相場の地合い）
     mk = q.groupby("date")["ret20"].median().rename("mkt20")
-    q = q.merge(mk, on="date", how="left")
+    q = _ljoin(q, mk, on="date", how="left")
     # 仮説(2026-11-21 13回目)：相場全体の短期の急落（全銘柄の5日騰落の中央値）
     mk5 = q.groupby("date")["ret5"].median().rename("mkt5")
-    q = q.merge(mk5, on="date", how="left")
+    q = _ljoin(q, mk5, on="date", how="left")
     q = _shrink(q)
     q = _shrink(add_context(q))
     # 仮説(2026-11-21 20回目4周目)：日本株だけが売られた度合い＝市場全体の5日騰落(中央値) − 米国株(S&P500)の5日騰落(前日)
@@ -802,22 +834,22 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     # 60日安値をつけた銘柄の割合（市場全体の投げ売り）・業種の5日騰落−市場全体の5日騰落（業種のローテーション）。t 終値時点で確定
     md1 = q.groupby("date")["ret1"].median().sort_index()
     dn_m = (md1 < 0).astype(int)
-    q = q.merge(dn_m.groupby((dn_m == 0).cumsum()).cumsum().astype(float).rename("mkt_dn_streak"), on="date", how="left")
+    q = _ljoin(q, dn_m.groupby((dn_m == 0).cumsum()).cumsum().astype(float).rename("mkt_dn_streak"), on="date", how="left")
     atlo = (q["low"] <= q["lo60"]).astype(float).where(q["lo60"].notna())
-    q = q.merge(atlo.groupby(q["date"]).mean().rename("mkt_lo60_frac"), on="date", how="left")
+    q = _ljoin(q, atlo.groupby(q["date"]).mean().rename("mkt_lo60_frac"), on="date", how="left")
     # 仮説(2026-11-22 46回目)：市場全体の60日安値割合の5日変化（投げ売りが収まりつつあるか）。t 終値で確定
     _ml = q.groupby("date")["mkt_lo60_frac"].first().sort_index()
-    q = q.merge((_ml - _ml.shift(5)).rename("mkt_lo60_chg5"), on="date", how="left")
+    q = _ljoin(q, (_ml - _ml.shift(5)).rename("mkt_lo60_chg5"), on="date", how="left")
     q["sec_rel5"] = q["sec5"] - q["mkt5"] if "sec5" in q.columns else np.nan
     # 仮説(2026-11-22 27回目)：日本の市場全体の60日高値からの下落（全銘柄の前日比の中央値を積み上げた指数）・
     # 業種内での20日騰落の順位（0=業種で最も下げた銘柄）・直近5日で下ヒゲ≥2%をつけた日数（下値での買い支え）。t 終値時点で確定
     mix = (1 + md1.fillna(0)).cumprod()
-    q = q.merge((mix / mix.rolling(60, min_periods=40).max() - 1).rename("mkt_dd60"), on="date", how="left")
+    q = _ljoin(q, (mix / mix.rolling(60, min_periods=40).max() - 1).rename("mkt_dd60"), on="date", how="left")
     # 仮説(2026-11-22 担当2)：市場全体の下げが続いている長さ＝同じ指数の120日高値からの経過営業日数と120日高値からの下落
     # （数日の急落か、何か月も続く下げ相場か。採用ルールの弱点＝長い下げ相場が検証期間にほぼ無い点の確認用）。t 終値時点で確定
     _amax = mix.rolling(120, min_periods=60).apply(lambda a: len(a) - 1 - int(np.argmax(a)), raw=True)
-    q = q.merge(_amax.rename("mkt_hi_days"), on="date", how="left")
-    q = q.merge((mix / mix.rolling(120, min_periods=60).max() - 1).rename("mkt_dd120"), on="date", how="left")
+    q = _ljoin(q, _amax.rename("mkt_hi_days"), on="date", how="left")
+    q = _ljoin(q, (mix / mix.rolling(120, min_periods=60).max() - 1).rename("mkt_dd120"), on="date", how="left")
     q["sec_rank20"] = q.groupby(["date", "sector"])["ret20"].rank(pct=True) if "sector" in q.columns else np.nan
     q["hammer5"] = (q["shadow_lo"] >= 0.02).astype(float).where(q["shadow_lo"].notna()).groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=5).sum())
     # 仮説(2026-11-22 28回目)：日次リターンの20日の1次自己相関（負＝行き過ぎが戻りやすい銘柄）・株価の水準（低位株は%で動きやすい）・
@@ -899,7 +931,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     else:
         q["sec_pbr_rank"] = np.nan
     ma25d = q.groupby("date")["mkt_above25"].first().sort_index()
-    q = q.merge((ma25d - ma25d.shift(5)).rename("mkt_ab25_chg5"), on="date", how="left")
+    q = _ljoin(q, (ma25d - ma25d.shift(5)).rename("mkt_ab25_chg5"), on="date", how="left")
     gdn = (q["gap"] <= -0.02).astype(float).where(q["gap"].notna())
     q["gap_dn_cnt20"] = gdn.groupby(q["code"], sort=False).transform(lambda s: s.rolling(20, min_periods=20).sum())
     # 仮説(2026-11-22 38回目)：業種内で25日線より上の割合の5日変化（業種の地合いが戻り始めたか）・
@@ -907,7 +939,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     if "sector" in q.columns:
         sab = q.groupby(["date", "sector"])["sec_above25"].first().sort_index()
         sch = (sab - sab.groupby(level=1).shift(5)).rename("sec_ab25_chg5").reset_index()
-        q = q.merge(sch, on=["date", "sector"], how="left")
+        q = _ljoin(q, sch, on=["date", "sector"], how="left")
     else:
         q["sec_ab25_chg5"] = np.nan
     q["jp_us_dd"] = q["mkt_dd60"] - q["us_dd60"] if "us_dd60" in q.columns else np.nan
@@ -948,7 +980,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     lo20c = q.groupby("code", sort=False)["close"].transform(lambda s: s.rolling(20, min_periods=20).min())
     rmin = q.groupby("code", sort=False)["rsi14"].transform(lambda s: s.rolling(20, min_periods=20).min())
     q["rsi_div"] = (q["rsi14"] - rmin).where(q["close"] <= lo20c * 1.03)
-    q = q.merge(q.groupby("date")["ret1"].median().rename("mkt_ret1"), on="date", how="left")
+    q = _ljoin(q, q.groupby("date")["ret1"].median().rename("mkt_ret1"), on="date", how="left")
     # 仮説(2026-11-22 43回目)：業種内の2日RSIの中央値（業種ぐるみの短期の売られすぎ）。t 終値時点で確定
     q["sec_rsi2"] = q.groupby(["date", "sector"])["rsi2"].transform("median")
     q = _shrink(q)   # 担当3 38周目：途中でも float32 に縮め、add_features の後半のメモリのピークを下げる（Actions の 16GB 対策。最後の _shrink と同じ処理）
@@ -959,7 +991,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         sdn = (sr1 < 0).astype(int)
         sgrp = (sdn == 0).groupby(level=1).cumsum()
         sstk = sdn.groupby([sdn.index.get_level_values(1), sgrp]).cumsum().astype(float).rename("sec_dn_streak").reset_index()
-        q = q.merge(sstk, on=["date", "sector"], how="left")
+        q = _ljoin(q, sstk, on=["date", "sector"], how="left")
         q["sec_lo60_frac"] = (q["low"] <= q["lo60"]).astype(float).where(q["lo60"].notna()).groupby([q["date"], q["sector"]]).transform("mean")
     else:
         q["sec_dn_streak"] = q["sec_lo60_frac"] = np.nan
@@ -971,7 +1003,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         son = (scs2 >= 0.15).astype(int)
         sg2 = (son == 0).groupby(level=1).cumsum()
         scd = son.groupby([son.index.get_level_values(1), sg2]).cumsum().astype(float).where(scs2.notna()).rename("sec_crash_days").reset_index()
-        q = q.merge(scd, on=["date", "sector"], how="left")
+        q = _ljoin(q, scd, on=["date", "sector"], how="left")
         q["sec_rank5"] = q.groupby(["date", "sector"])["ret5"].rank(pct=True)
     else:
         q["sec_crash_days"] = q["sec_rank5"] = np.nan
@@ -1003,7 +1035,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         _n = q["ret20"].where(q["mfg"] == 0).groupby(q["date"]).transform("median")
         q["mfg_sp20"] = _m - _n
         _sd = q.groupby(["date", "sector"])["sec20"].first().groupby(level=0).std().rename("xsec_disp20")
-        q = q.merge(_sd, on="date", how="left")
+        q = _ljoin(q, _sd, on="date", how="left")
         q["sec_vol_exp"] = q.groupby(["date", "sector"])["vol_exp"].transform("median")
         # 仮説(2026-11-22 担当2)：業種間のばらつき（採用ルールの柱）の派生。5日での広がり・60日平均に対する倍率
         # （ばらつきが急に広がった日か）・その業種の20日騰落の業種間の順位（0=最も下げた業種）。t 終値時点で確定
@@ -1020,7 +1052,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["crash_sec_n"] = q["date"].map(_cn).astype(float)
         q["crash_sec_chg5"] = q["date"].map(_cn - _cn.shift(5)).astype(float)
         _rk = q.groupby(["date", "sector"])["sec20"].first().groupby(level=0).rank(pct=True).rename("sec20_rank")
-        q = q.merge(_rk.reset_index(), on=["date", "sector"], how="left")
+        q = _ljoin(q, _rk.reset_index(), on=["date", "sector"], how="left")
         # 仮説(2026-11-23 担当1 73周目)：業種のローテーション。業種の順位の20日変化（主力から売られる側へ回ったか）と、
         # 20〜80日前の順位の最大（少し前まで上位＝資金が抜けた業種）。業種×日付の表で計算、t 終値で確定
         _rw = _rk.unstack("sector").sort_index()
