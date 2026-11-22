@@ -117,6 +117,12 @@ def _etf(q, codes):
     return pd.DataFrame({"close": s["close"], "tv": tv})
 
 
+def _map_ds(q: pd.DataFrame, s: pd.Series) -> np.ndarray:
+    """(日付, 業種) で引ける値を各行に割り当てる（q.merge と同じ結果。5年分の大きな表を複製しないのでメモリを使わない）"""
+    s = s[~s.index.duplicated()]
+    return s.reindex(pd.MultiIndex.from_arrays([q["date"], q["sector"]])).to_numpy().astype("float32")
+
+
 def _shrink(q: pd.DataFrame) -> pd.DataFrame:
     """メモリ節約：小数の列を float32 に（5年分×多数の要因で GitHub のサーバーのメモリ16GBを超えないように）"""
     for c in q.columns[q.dtypes == "float64"]:
@@ -1151,7 +1157,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         _sw = _sw["mean"].where(_sw["count"] >= 2).unstack().sort_index()
         _sw = _sw.shift(HOLD).rolling(60, min_periods=5).mean().stack()
         _sw.name = "sec_crash_hit"
-        q = q.drop(columns=["sec_crash_hit"], errors="ignore").merge(_sw.reset_index().rename(columns={"level_1": "sector"}), on=["date", "sector"], how="left")
+        q["sec_crash_hit"] = _map_ds(q, _sw)
     else:
         q["sec_crash_hit"] = np.nan
     if "mkt_seg" in q.columns:
@@ -1290,12 +1296,11 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         _sa.name = "sec_cap_age"
         _sc = (_sdd >= 0.10).astype(float).where(_sdd.notna()).rolling(10, min_periods=7).sum().stack()
         _sc.name = "sec_cap_days10"
-        q = q.drop(columns=["sec_cap_age", "sec_cap_days10"], errors="ignore")
         for _x in (_sa, _sc):
-            q = q.merge(_x.reset_index().rename(columns={"level_1": "sector"}), on=["date", "sector"], how="left")
+            q[_x.name] = _map_ds(q, _x)
         _sd = _cp.groupby([q["date"], q["sector"]]).mean().unstack().sort_index().rolling(5, min_periods=3).max().stack()
         _sd.name = "sec_cap_pk5"
-        q = q.drop(columns=["sec_cap_pk5"], errors="ignore").merge(_sd.reset_index().rename(columns={"level_1": "sector"}), on=["date", "sector"], how="left")
+        q["sec_cap_pk5"] = _map_ds(q, _sd)
     else:
         q["sec_cap_pk5"] = q["sec_cap_age"] = q["sec_cap_days10"] = np.nan
     # 仮説(2026-11-23 担当1 43周目)：業種の投げ売りの定義の感度（前日比-3%以下・-8%以下の割合の直近5日の最大）と、
@@ -1305,7 +1310,7 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
             _c2 = (q["ret1"] <= _th).astype(float).where(q["ret1"].notna() & _ng)
             _x = _c2.groupby([q["date"], q["sector"]]).mean().unstack().sort_index().rolling(5, min_periods=3).max().stack()
             _x.name = _nm
-            q = q.drop(columns=[_nm], errors="ignore").merge(_x.reset_index().rename(columns={"level_1": "sector"}), on=["date", "sector"], how="left")
+            q[_nm] = _map_ds(q, _x)
         q["sec_cap_xs"] = q["sec_cap_pk5"] - q["mkt_cap_pk5"]
     else:
         q["sec_cap3_pk5"] = q["sec_cap8_pk5"] = q["sec_cap_xs"] = np.nan
