@@ -1958,6 +1958,25 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
             md.append(f"| {d_:%Y-%m-%d} | {int(r_['n'])} | {pct(r_['w'] / r_['n'])} | {pct(r_['p'] / r_['n'], 2)} |")
     else:
         md.append("- 信号日が3日未満のため計算しない")
+    # 担当2(38周目)：1日に数十件まとめて信号が出るため、1日あたり上位N件だけ買った場合（資金を1日に集中させない買い方の目安）。
+    # 並べ方はすべて判定日 t の終値で確定する値。情報用（採用判定には使わない）
+    try:
+        _tt = t.copy()
+        for col_ in ("ret20", "turn20", "mcap"):
+            if col_ not in _tt.columns and col_ in q.columns:
+                _tt[col_] = q.loc[t.index, col_].to_numpy()
+        md += ["", "## 1日あたり上位N件だけ買った場合（情報用：同じ日に全部買わない場合の目安）", "",
+               "| 並べ方 | 1日の上限 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|---|"]
+        for lbl_, col_, asc_ in (("20日騰落が大きく下げた順", "ret20", True), ("回転率が高い順", "turn20", False),
+                                 ("時価総額が大きい順", "mcap", False)):
+            if col_ not in _tt.columns:
+                continue
+            for n_top in (3, 5, 10):
+                s_ = _tt.sort_values(["date", col_], ascending=[True, asc_]).groupby("date").head(n_top)
+                if len(s_):
+                    md.append(f"| {lbl_} | {n_top}件 | {len(s_)} | {pct(s_['win'].mean())} | {pct(s_['pnl'].mean(), 2)} |")
+    except Exception as e:
+        md += ["", f"（1日あたり上位N件の集計は失敗：{e}）"]
     # 相場の状態別：市場全体の下げの長さ・深さで分けた成績（長い下げ相場でも効くか）
     md += ["", "## 相場の状態別（市場全体の下げの長さ・深さ）", "", "| 区分 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
     for f_, cuts, unit in (("mkt_hi_days", [-1, 10, 30, 60, 1e9], "日"), ("mkt_dd120", [-1, -0.2, -0.1, -0.05, 1], ""),
