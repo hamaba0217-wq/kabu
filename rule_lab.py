@@ -894,6 +894,17 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     _c = q["close"].where(q["close"] > 0)
     _unit = (10.0 ** np.floor(np.log10(_c))) / 2
     q["round_up"] = (np.floor(_c / _unit) + 1) * _unit / _c - 1
+    # 仮説(2026-11-22 担当2)：値幅制限（東証の制限値幅表）いっぱいまで下げて安値引け＝ストップ安（需給の投げ）・ストップ高。
+    # 前日終値（分割調整後のため、分割前の期間は近似）から制限値幅を求め、前日比が制限値幅の9割以上で安値(高値)引けの日。t 終値で確定
+    _pc = q.groupby("code", sort=False)["close"].shift(1)
+    _edges = [100, 200, 500, 700, 1000, 1500, 2000, 3000, 5000, 7000, 10000, 15000, 20000, 30000, 50000, 70000, 100000, 150000, 200000, 300000, 500000]
+    _lims = [30, 50, 80, 100, 150, 300, 400, 500, 700, 1000, 1500, 3000, 4000, 5000, 7000, 10000, 15000, 30000, 40000, 50000, 70000, 100000]
+    _lim = pd.Series(np.array(_lims, dtype=float)[np.searchsorted(_edges, _pc.fillna(0).to_numpy(), side="right")], index=q.index).where(_pc.notna())
+    _sl = ((q["close"] - _pc <= -0.9 * _lim) & (q["close"] <= q["low"] * 1.001)).astype(float).where(_pc.notna())
+    _sh = ((q["close"] - _pc >= 0.9 * _lim) & (q["close"] >= q["high"] * 0.999)).astype(float).where(_pc.notna())
+    q["stop_lo5"] = _sl.groupby(q["code"]).transform(lambda x: x.rolling(5, min_periods=5).sum())
+    q["stop_hi20"] = _sh.groupby(q["code"]).transform(lambda x: x.rolling(20, min_periods=20).sum())
+    q["mkt_stop_lo"] = _sl.groupby(q["date"]).transform("mean")
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -1136,6 +1147,9 @@ GRID = {
     "dd20": [("<=", -0.20), ("<=", -0.12), (">=", -0.03)],
     "mfg_sp20": [("<=", -0.03), ("<=", -0.01), (">=", 0.02)],
     "xsec_disp20": [(">=", 0.06), (">=", 0.04), ("<=", 0.025)],
+    "stop_lo5": [(">=", 1), (">=", 2)],
+    "stop_hi20": [(">=", 1), (">=", 2)],
+    "mkt_stop_lo": [(">=", 0.001), (">=", 0.002)],
     "xsec_disp_chg5": [(">=", 0.01), (">=", 0.005), ("<=", -0.005)],
     "xsec_disp_rel60": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
     "sec20_rank": [("<=", 0.1), ("<=", 0.25), (">=", 0.75)],
@@ -1250,7 +1264,7 @@ LABEL = {
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
     "bps_chg": "BPSの前回決算からの変化", "mkt_lo60_chg5": "市場全体の60日安値割合の5日変化", "sec_op_yoy": "業種内の営業利益の前年同期比(中央値)",
     "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
-    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
+    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
@@ -1276,7 +1290,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak", "stop_lo5", "stop_hi20"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
