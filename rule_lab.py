@@ -1020,7 +1020,17 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["crash_sec_chg5"] = q["date"].map(_cn - _cn.shift(5)).astype(float)
         _rk = q.groupby(["date", "sector"])["sec20"].first().groupby(level=0).rank(pct=True).rename("sec20_rank")
         q = q.merge(_rk.reset_index(), on=["date", "sector"], how="left")
+        # 仮説(2026-11-23 担当1 73周目)：業種のローテーション。業種の順位の20日変化（主力から売られる側へ回ったか）と、
+        # 20〜80日前の順位の最大（少し前まで上位＝資金が抜けた業種）。業種×日付の表で計算、t 終値で確定
+        _rw = _rk.unstack("sector").sort_index()
+        _chg = _rw - _rw.shift(20)
+        _pmx = _rw.shift(20).rolling(60, min_periods=40).max()
+        _mi = pd.MultiIndex.from_arrays([q["date"], q["sector"]])   # merge で表全体を複製しない（Actions のメモリ対策）
+        q["sec_rank_chg20"] = _chg.stack().reindex(_mi).to_numpy()
+        q["sec_rank_pmax"] = _pmx.stack().reindex(_mi).to_numpy()
+        del _rw, _chg, _pmx, _mi
     else:
+        q["sec_rank_chg20"] = q["sec_rank_pmax"] = np.nan
         q["mfg_sp20"] = q["xsec_disp20"] = q["sec_vol_exp"] = np.nan
         q["xsec_disp_chg5"] = q["xsec_disp_rel60"] = q["sec20_rank"] = np.nan
         q["xsec_disp_pk10"] = q["xsec_disp_d4"] = q["crash_sec_n"] = q["crash_sec_chg5"] = np.nan
@@ -1674,6 +1684,8 @@ GRID = {
     "mkt_fx_corr60": [(">=", 0.4), (">=", 0.2), ("<=", 0)],
     "mkt_fx_corr_chg": [(">=", 0.2), ("<=", -0.2)],
     "sec20_rank": [("<=", 0.1), ("<=", 0.25), (">=", 0.75)],
+    "sec_rank_chg20": [("<=", -0.5), ("<=", -0.3), (">=", 0.3)],
+    "sec_rank_pmax": [(">=", 0.9), (">=", 0.75), ("<=", 0.4)],
     "sec_vol_exp": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
     "engulf": [(">=", 1)],
     "ll_streak": [(">=", 5), (">=", 3), ("<=", 0)],
@@ -1872,7 +1884,7 @@ LABEL = {
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
     "bps_chg": "BPSの前回決算からの変化", "mkt_lo60_chg5": "市場全体の60日安値割合の5日変化", "sec_op_yoy": "業種内の営業利益の前年同期比(中央値)",
     "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
-    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "mkt_us_corr20": "日本市場全体と前夜の米国株の20日相関", "mkt_us_corr_chg": "日本市場と米国株の20日相関−60日相関", "disc_share": "20日の下げのうち決算発表後の反応の割合(発表なし=0)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "xsec_disp_pk10": "業種間のばらつきの直近10日の最大に対する位置(1=今日が山)", "xsec_disp_d4": "直近10日で業種間のばらつき≥4%の日数", "crash_sec_n": "同業種急落≥15%の業種の数(33業種中)", "crash_sec_chg5": "同業種急落≥15%の業種の数の5日変化", "mkt_rate_corr60": "市場全体と日本10年金利の変化の60日相関", "mkt_rate_corr_chg": "市場全体と金利の20日相関−60日相関", "mkt_fx_corr60": "市場全体とドル円の60日相関", "mkt_fx_corr_chg": "市場全体とドル円の20日相関−60日相関", "mg_ratio": "信用倍率(信用買い残/売り残・前週末)", "mg_long_chg4": "信用買い残の4週変化率", "mg_short_chg4": "信用売り残の4週変化率", "mg_long_d": "信用買い残が20日平均出来高の何日分か", "mkt_mg_chg4": "市場全体の信用買い残の4週変化(売買代金5億円以上の銘柄の中央値)", "nk_beta": "日経225寄りの度合い(TOPIXを除いた日経225−TOPIXの差への60日感応度)", "nt_dn5": "日経225−TOPIX(ETF)の5日累計の騰落差", "nk_beta120": "日経225寄りの度合い(120日)","sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
+    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "mkt_us_corr20": "日本市場全体と前夜の米国株の20日相関", "mkt_us_corr_chg": "日本市場と米国株の20日相関−60日相関", "disc_share": "20日の下げのうち決算発表後の反応の割合(発表なし=0)", "stop_lo5": "直近5日のストップ安(制限値幅いっぱいで安値引け)の日数", "stop_hi20": "直近20日のストップ高の日数", "mkt_stop_lo": "当日ストップ安の銘柄の割合(市場全体)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "xsec_disp_pk10": "業種間のばらつきの直近10日の最大に対する位置(1=今日が山)", "xsec_disp_d4": "直近10日で業種間のばらつき≥4%の日数", "crash_sec_n": "同業種急落≥15%の業種の数(33業種中)", "crash_sec_chg5": "同業種急落≥15%の業種の数の5日変化", "mkt_rate_corr60": "市場全体と日本10年金利の変化の60日相関", "mkt_rate_corr_chg": "市場全体と金利の20日相関−60日相関", "mkt_fx_corr60": "市場全体とドル円の60日相関", "mkt_fx_corr_chg": "市場全体とドル円の20日相関−60日相関", "mg_ratio": "信用倍率(信用買い残/売り残・前週末)", "mg_long_chg4": "信用買い残の4週変化率", "mg_short_chg4": "信用売り残の4週変化率", "mg_long_d": "信用買い残が20日平均出来高の何日分か", "mkt_mg_chg4": "市場全体の信用買い残の4週変化(売買代金5億円以上の銘柄の中央値)", "nk_beta": "日経225寄りの度合い(TOPIXを除いた日経225−TOPIXの差への60日感応度)", "nt_dn5": "日経225−TOPIX(ETF)の5日累計の騰落差", "nk_beta120": "日経225寄りの度合い(120日)","sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)", "sec_rank_chg20": "業種の20日騰落の順位の20日変化(マイナス=上位から下位へ)", "sec_rank_pmax": "業種の20〜80日前の順位の最大(1=少し前まで最上位)",
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
