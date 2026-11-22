@@ -1110,6 +1110,9 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     _c_all, _h_all, _l_all = q["close"].to_numpy(float), q["high"].to_numpy(float), q["low"].to_numpy(float)
     _o10 = np.full(len(q), np.nan); _oa = np.full(len(q), np.nan); _gf = np.full(len(q), np.nan); _gc = np.full(len(q), np.nan)
     _sp5 = np.full(len(q), np.nan); _poc = np.full(len(q), np.nan)
+    _gage = np.full(len(q), np.nan); _gsz = np.full(len(q), np.nan); _gxs = np.full(len(q), np.nan)
+    _gp_all = q["gap"].to_numpy(float) if "gap" in q.columns else np.full(len(q), np.nan)
+    _mg_all = q["mkt_gap"].to_numpy(float) if "mkt_gap" in q.columns else np.full(len(q), np.nan)
     for _ix in q.groupby("code", sort=False).indices.values():
         n = len(_ix)
         if n < 41:
@@ -1145,6 +1148,12 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
             dist = np.where(open_g, topw / cl - 1, np.inf).min(1)
         _gf[_ix[G - 1:]] = np.where(np.isfinite(dist), dist, 9.9)
         _gc[_ix[G - 1:]] = open_g.sum(1)
+        _has = np.isfinite(dist)
+        _j = np.where(open_g, topw / cl - 1, np.inf).argmin(1)
+        _rows = np.arange(len(_j))
+        _gage[_ix[G - 1:]] = np.where(_has, G - 1 - _j, np.nan)
+        _gsz[_ix[G - 1:]] = np.where(_has, topw[_rows, _j] / _swv(hh, G)[_rows, _j] - 1, np.nan)
+        _gxs[_ix[G - 1:]] = np.where(_has, _swv(_gp_all[_ix], G)[_rows, _j] - _swv(_mg_all[_ix], G)[_rows, _j], np.nan)
     q["ovh10"], q["ovh_all"], q["gap_fill"] = _o10, _oa, _gf
     # 仮説(2026-11-22 担当1 31周目)：埋まっていない下窓の数（窓を開けて下げた回数）、市場全体で+10%以内に窓が残る銘柄の割合
     # （一斉に窓を開けて下げた相場か）、TOPIX ETF(1306)自身の窓埋め余地（指数の戻り目標）。t 終値で確定
@@ -1152,6 +1161,9 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     # 仮説(2026-11-22 担当1 32周目)：下値の支え（60日の売買代金のうち終値〜-5%で売買された割合＝今の水準で買った人の多さ）と、
     # 最も売買が多かった価格帯（60日の価格帯別売買代金の山・2%刻み）の終値からの距離（上に山があれば戻りの目標になる仮説）
     q["sup5"], q["poc_dist"] = _sp5, _poc
+    # 仮説(2026-11-23 担当1 33周目)：最も近い埋まっていない下窓の性質。gap_age 窓を開けてからの営業日数、gap_sz 窓の大きさ
+    # （前日安値/当日高値-1）、gap_xs その日の個別の窓(始値/前日終値-1)−全銘柄の窓の中央値（マイナス=その銘柄だけの悪材料の窓）
+    q["gap_age"], q["gap_sz"], q["gap_xs"] = _gage, _gsz, _gxs
     _gok = ~q["etf"] if "etf" in q.columns else pd.Series(True, index=q.index)
     q["mkt_gap_frac"] = (q["gap_fill"] <= 0.10).astype(float).where(q["gap_fill"].notna() & _gok).groupby(q["date"]).transform("mean")
     _ig = q.loc[q["code"].isin(["1306", "13060"]), ["date", "gap_fill"]].drop_duplicates("date").set_index("date")["gap_fill"]
@@ -1475,6 +1487,9 @@ GRID = {
     "gap_fill": [("<=", 0.05), ("<=", 0.10), ("<=", 0.20), (">=", 9)],
     "gap_cnt": [(">=", 1), (">=", 2), (">=", 3)],
     "sup5": [(">=", 0.3), (">=", 0.15), ("<=", 0.05)],
+    "gap_age": [("<=", 5), ("<=", 10), (">=", 20)],
+    "gap_sz": [(">=", 0.05), (">=", 0.03), ("<=", 0.02)],
+    "gap_xs": [("<=", -0.05), ("<=", -0.02), (">=", -0.01)],
     "poc_dist": [(">=", 0.10), (">=", 0.20), ("<=", 0.0)],
     "mkt_gap_frac": [(">=", 0.3), (">=", 0.15), ("<=", 0.05)],
     "idx_gap_fill": [("<=", 0.05), ("<=", 0.10), (">=", 9)],
@@ -1566,7 +1581,7 @@ LABEL = {
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
     "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数", "mkt_rv_off": "市場全体のボラ拡大-直近5日の最大値(乱高下の峠越え)", "mkt_speed": "市場全体の下げの速さ(5日騰落/20日騰落の中央値)", "sales_yld": "予想売上高/時価総額(PSRの逆数)", "mkt_dn_tv": "市場全体の売買代金のうち下落銘柄の割合", "mkt_dn_tv5": "市場全体の売買代金のうち下落銘柄の割合(5日平均)", "disc_season": "直近10日以内に決算発表した銘柄の割合(決算シーズン)", "mkt_disc_ret": "直近10日の決算発表銘柄の株価反応(中央値)", "round_up": "上の切りのよい株価(桁の半分単位)までの距離", "fx_tail20": "為替の追い風(為替感応度×ドル円の20日変化)", "rate_corr60": "日本10年金利の上昇との60日相関(金利感応度)", "rate_tail20": "金利の追い風(金利感応度×10年金利の20日変化)", "fx_tail5": "為替の短期の追い風(為替感応度×ドル円の5日変化)", "oil_tail20": "原油の追い風(原油との相関×WTIの20日騰落)", "sec_fx_tail20": "業種全体の為替の追い風(中央値)", "fx_tail_rel": "為替の追い風-業種の中央値", "us_tail20": "米国株の追い風(米国株との相関×S&P500の20日騰落)", "sec_us_tail20": "業種全体の米国株の追い風(中央値)", "sec_disc_ret": "同業種で直近10日に決算発表した銘柄の株価反応(中央値)", "riskoff5": "リスクオフの総合点(5日で円高・VIX上昇・米金利低下・米株安の数)", "riskoff_off": "リスクオフの和らぎ(総合点-直近5日の最大)", "mkt_share": "20日の下げのうち市場全体で説明できる割合(ベータ×市場の騰落)", "sec_share": "20日の下げのうち業種全体で説明できる割合", "pm_ret": "前月の月間騰落", "mtd_ret": "月初来の騰落(前月末から)", "lim_dn20": "直近20日でストップ安付近で引けた日数", "lim_up20": "直近20日でストップ高付近で引けた日数", "gold_corr60": "金(ETF)との60日相関", "gold_tail20": "金の追い風(金との相関×金の20日騰落)", "beta_up60": "市場が上げた日だけの60日ベータ", "beta_dn60": "市場が下げた日だけの60日ベータ", "beta_asym": "上げの日のベータ−下げの日のベータ", "up_day_xs20": "直近20日の市場が上げた日の超過騰落(平均)", "vix_rv_gap": "VIX(前日)−日経225の20日実現ボラ", "dn_day_xs20": "直近20日の市場が下げた日の超過騰落(平均)", "updn_xs20": "上げた日の超過騰落−下げた日の超過騰落", "sec_up_xs20": "業種内の市場が上げた日の超過騰落(中央値)", "up_xs_rel": "市場が上げた日の超過騰落−業種の中央値", "pbr_cross1": "急落でPBR1倍を新たに割った(20日前は1倍超)", "pbr_vs1": "PBR−1", "mkt_pbr1_frac": "市場全体でPBR1倍割れの銘柄の割合", "mkt_pbr1_chg20": "PBR1倍割れの銘柄の割合の20日変化", "is_def": "ディフェンシブ業種(食料品・医薬品・電気ガス・陸運)", "def_sp20": "ディフェンシブ業種−それ以外の20日騰落の差(中央値)", "def_sp5": "ディフェンシブ業種−それ以外の5日騰落の差(中央値)", "split60": "直近60日以内に株式分割", "split120": "直近120日以内に株式分割", "rsplit120": "直近120日以内に株式併合", "dd_hist": "過去の-10%下落の起きやすさ(確定済みの直近60回)", "big_dn20": "直近20日の大陰線(前日比-5%以下)の日数", "big_dn_share": "20日の下げのうち大陰線の日の下げの割合", "nt_chg20": "NT倍率(日経225/TOPIXのETF)の20日変化", "nt_chg5": "NT倍率の5日変化", "pnl_hist": "過去の平均損益(確定済みの直近60回)", "crash_hit_hist": "その銘柄の急落時(20日騰落≤-15%)の過去の勝率(確定済み・120日)", "mkt_crash_hit": "市場全体の最近の急落買いの勝率(確定済み・20営業日)",
-    "ovh10": "上値の売り圧力(60日の売買代金のうち終値〜+10%で売買された割合)", "ovh_all": "上に捕まった買い手(60日の売買代金のうち終値より上の割合)", "gap_fill": "埋まっていない上の下窓までの距離(40日・窓なし=9.9)", "gap_cnt": "埋まっていない上の下窓の数(40日)", "sup5": "下値の支え(60日の売買代金のうち終値〜-5%で売買された割合)", "poc_dist": "60日で最も売買が多かった価格帯の終値からの距離", "mkt_gap_frac": "市場全体で+10%以内に埋まっていない下窓がある銘柄の割合", "idx_gap_fill": "TOPIX(ETF)の埋まっていない上の下窓までの距離(窓なし=9.9)",
+    "ovh10": "上値の売り圧力(60日の売買代金のうち終値〜+10%で売買された割合)", "ovh_all": "上に捕まった買い手(60日の売買代金のうち終値より上の割合)", "gap_fill": "埋まっていない上の下窓までの距離(40日・窓なし=9.9)", "gap_cnt": "埋まっていない上の下窓の数(40日)", "sup5": "下値の支え(60日の売買代金のうち終値〜-5%で売買された割合)", "poc_dist": "60日で最も売買が多かった価格帯の終値からの距離", "gap_age": "最も近い埋まっていない下窓を開けてからの日数", "gap_sz": "最も近い埋まっていない下窓の大きさ", "gap_xs": "最も近い埋まっていない下窓の日の個別の窓(全銘柄の中央値との差)", "mkt_gap_frac": "市場全体で+10%以内に埋まっていない下窓がある銘柄の割合", "idx_gap_fill": "TOPIX(ETF)の埋まっていない上の下窓までの距離(窓なし=9.9)",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1588,7 +1603,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak", "stop_lo5", "stop_hi20", "mkt_hi_days"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak", "stop_lo5", "stop_hi20", "mkt_hi_days", "gap_age"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
