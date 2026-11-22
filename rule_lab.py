@@ -699,6 +699,18 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q = q.merge(q.groupby("date")["ret1"].median().rename("mkt_ret1"), on="date", how="left")
     # 仮説(2026-11-22 43回目)：業種内の2日RSIの中央値（業種ぐるみの短期の売られすぎ）。t 終値時点で確定
     q["sec_rsi2"] = q.groupby(["date", "sector"])["rsi2"].transform("median")
+    # 仮説(2026-11-22 44回目)：業種の連続下落日数（業種の前日比の中央値がマイナスの日の連続）・当日の騰落を20日ボラで割った値
+    # （その日のショックの大きさ）・業種内で60日安値をつけた銘柄の割合（業種ぐるみの投げ売り）。すべて t 終値時点で確定
+    if "sector" in q.columns and "sec_ret1" in q.columns:
+        sr1 = q.groupby(["date", "sector"])["sec_ret1"].first().sort_index()
+        sdn = (sr1 < 0).astype(int)
+        sgrp = (sdn == 0).groupby(level=1).cumsum()
+        sstk = sdn.groupby([sdn.index.get_level_values(1), sgrp]).cumsum().astype(float).rename("sec_dn_streak").reset_index()
+        q = q.merge(sstk, on=["date", "sector"], how="left")
+        q["sec_lo60_frac"] = (q["low"] <= q["lo60"]).astype(float).where(q["lo60"].notna()).groupby([q["date"], q["sector"]]).transform("mean")
+    else:
+        q["sec_dn_streak"] = q["sec_lo60_frac"] = np.nan
+    q["ret1_z"] = q["ret1"] / q["vol20"].replace(0, np.nan)
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -925,6 +937,9 @@ GRID = {
     "ndx_spx5": [("<=", -0.015), ("<=", -0.005), (">=", 0.01)],
     "usdjpy_dev60": [("<=", -0.03), ("<=", -0.01), (">=", 0.02)],
     "sec_rsi2": [("<=", 10), ("<=", 25), (">=", 75)],
+    "sec_dn_streak": [(">=", 4), (">=", 2), ("<=", 0)],
+    "ret1_z": [("<=", -2), ("<=", -1), (">=", 1)],
+    "sec_lo60_frac": [(">=", 0.3), (">=", 0.15), ("<=", 0.03)],
 }
 
 LABEL = {
@@ -1004,6 +1019,7 @@ LABEL = {
     "sec_from_hi": "業種の52週高値からの位置(中央値)", "from_hi_rel": "52週高値からの位置-業種の中央値",
     "rsi2": "2日RSI", "rsi_div": "20日安値圏でのRSI14の20日最低からの戻り(強気ダイバージェンス)", "mkt_ret1": "市場全体のその日の騰落(中央値)",
     "ndx_spx5": "ナスダック-S&P500の5日騰落の差(前日)", "usdjpy_dev60": "ドル円の60日平均からの乖離(前日)", "sec_rsi2": "業種内の2日RSIの中央値",
+    "sec_dn_streak": "業種の連続下落日数(業種の前日比の中央値)", "ret1_z": "当日の騰落/20日ボラ", "sec_lo60_frac": "業種内で60日安値をつけた銘柄の割合",
 }
 POINT_FEATS = {"jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1025,7 +1041,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
@@ -1039,7 +1055,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
