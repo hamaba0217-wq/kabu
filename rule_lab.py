@@ -783,8 +783,16 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         _sd = q.groupby(["date", "sector"])["sec20"].first().groupby(level=0).std().rename("xsec_disp20")
         q = q.merge(_sd, on="date", how="left")
         q["sec_vol_exp"] = q.groupby(["date", "sector"])["vol_exp"].transform("median")
+        # 仮説(2026-11-22 担当2)：業種間のばらつき（採用ルールの柱）の派生。5日での広がり・60日平均に対する倍率
+        # （ばらつきが急に広がった日か）・その業種の20日騰落の業種間の順位（0=最も下げた業種）。t 終値時点で確定
+        _sd = _sd.sort_index()
+        q["xsec_disp_chg5"] = q["date"].map(_sd - _sd.shift(5))
+        q["xsec_disp_rel60"] = q["date"].map(_sd / _sd.rolling(60, min_periods=40).mean())
+        _rk = q.groupby(["date", "sector"])["sec20"].first().groupby(level=0).rank(pct=True).rename("sec20_rank")
+        q = q.merge(_rk.reset_index(), on=["date", "sector"], how="left")
     else:
         q["mfg_sp20"] = q["xsec_disp20"] = q["sec_vol_exp"] = np.nan
+        q["xsec_disp_chg5"] = q["xsec_disp_rel60"] = q["sec20_rank"] = np.nan
     # 仮説(2026-11-22 48回目)：陽の包み足（前日陰線を当日陽線が包む＝売りの一巡）・安値の連続切り下げ日数・
     # 直下の価格の節目（100円・1000円などの区切り）からの距離（節目が下値の支えになるか）。すべて t 終値時点で確定
     _g = q.groupby("code", sort=False)
@@ -1118,6 +1126,9 @@ GRID = {
     "dd20": [("<=", -0.20), ("<=", -0.12), (">=", -0.03)],
     "mfg_sp20": [("<=", -0.03), ("<=", -0.01), (">=", 0.02)],
     "xsec_disp20": [(">=", 0.06), (">=", 0.04), ("<=", 0.025)],
+    "xsec_disp_chg5": [(">=", 0.01), (">=", 0.005), ("<=", -0.005)],
+    "xsec_disp_rel60": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
+    "sec20_rank": [("<=", 0.1), ("<=", 0.25), (">=", 0.75)],
     "sec_vol_exp": [(">=", 1.5), (">=", 1.2), ("<=", 0.8)],
     "engulf": [(">=", 1)],
     "ll_streak": [(">=", 5), (">=", 3), ("<=", 0)],
@@ -1225,7 +1236,7 @@ LABEL = {
     "rate_sp": "日米10年金利差の水準(%pt・前日)", "sec_crash_days": "業種の急落状態(急落割合≥15%)の連続日数", "sec_rank5": "業種内の5日騰落の順位(0=最も下げた)",
     "bps_chg": "BPSの前回決算からの変化", "mkt_lo60_chg5": "市場全体の60日安値割合の5日変化", "sec_op_yoy": "業種内の営業利益の前年同期比(中央値)",
     "sec5_rank": "業種の5日騰落の業種間の順位(0=最も下げた)", "dd20": "20日高値(終値)からの下落率",
-    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)",
+    "mfg_sp20": "製造業-非製造業の20日騰落の差(中央値)", "xsec_disp20": "業種の20日騰落の業種間のばらつき(標準偏差)", "xsec_disp_chg5": "業種間のばらつきの5日変化", "xsec_disp_rel60": "業種間のばらつきの60日平均に対する倍率", "sec20_rank": "業種の20日騰落の業種間の順位(0=最も下げた)",
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
