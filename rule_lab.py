@@ -830,6 +830,17 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     else:
         q["sec5_rank"] = np.nan
     q["dd20"] = q["close"] / q.groupby("code", sort=False)["close"].transform(lambda s: s.rolling(20, min_periods=20).max()) - 1
+    # 仮説(53回目22周目 担当1)：業種のローテーション＝ディフェンシブ業種（食料品・医薬品・電気ガス・陸運）への逃避度。
+    # ディフェンシブ−それ以外の20日・5日騰落の差（中央値）。5日の差がマイナス＝逃避が巻き戻り始めた。t 終値で確定
+    if "sector" in q.columns:
+        _df = q["sector"].isin(["食料品", "医薬品", "電気･ガス業", "陸運業"])
+        q["is_def"] = _df.astype(float).where(q["sector"].notna() & (q["sector"] != "不明"))
+        for _w in (20, 5):
+            _a = q[f"ret{_w}"].where(q["is_def"] == 1).groupby(q["date"]).transform("median")
+            _b = q[f"ret{_w}"].where(q["is_def"] == 0).groupby(q["date"]).transform("median")
+            q[f"def_sp{_w}"] = _a - _b
+    else:
+        q["is_def"] = q["def_sp20"] = q["def_sp5"] = np.nan
     # 仮説(2026-11-22 47回目)：製造業-非製造業の20日騰落の差（景気敏感株のローテーション）・業種の20日騰落の業種間のばらつき
     # （業種ローテーションの激しさ）・業種内のボラ拡大(5日/60日)の中央値（業種ぐるみの変動の拡大）。すべて t 終値時点で確定
     if "sector" in q.columns and "mfg" in q.columns:
@@ -1319,6 +1330,9 @@ GRID = {
     "pbr_vs1": [("<=", -0.2), ("<=", 0.0), (">=", 0.0), (">=", 0.5)],
     "mkt_pbr1_frac": [(">=", 0.4), ("<=", 0.3)],
     "mkt_pbr1_chg20": [(">=", 0.05), (">=", 0.02), ("<=", -0.02)],
+    "is_def": [(">=", 1), ("<=", 0)],
+    "def_sp20": [(">=", 0.05), (">=", 0.02), ("<=", 0.0), ("<=", -0.02)],
+    "def_sp5": [(">=", 0.01), ("<=", 0.0), ("<=", -0.01)],
 }
 
 LABEL = {
@@ -1406,7 +1420,7 @@ LABEL = {
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
-    "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数", "mkt_rv_off": "市場全体のボラ拡大-直近5日の最大値(乱高下の峠越え)", "mkt_speed": "市場全体の下げの速さ(5日騰落/20日騰落の中央値)", "sales_yld": "予想売上高/時価総額(PSRの逆数)", "mkt_dn_tv": "市場全体の売買代金のうち下落銘柄の割合", "mkt_dn_tv5": "市場全体の売買代金のうち下落銘柄の割合(5日平均)", "disc_season": "直近10日以内に決算発表した銘柄の割合(決算シーズン)", "mkt_disc_ret": "直近10日の決算発表銘柄の株価反応(中央値)", "round_up": "上の切りのよい株価(桁の半分単位)までの距離", "fx_tail20": "為替の追い風(為替感応度×ドル円の20日変化)", "rate_corr60": "日本10年金利の上昇との60日相関(金利感応度)", "rate_tail20": "金利の追い風(金利感応度×10年金利の20日変化)", "fx_tail5": "為替の短期の追い風(為替感応度×ドル円の5日変化)", "oil_tail20": "原油の追い風(原油との相関×WTIの20日騰落)", "sec_fx_tail20": "業種全体の為替の追い風(中央値)", "fx_tail_rel": "為替の追い風-業種の中央値", "us_tail20": "米国株の追い風(米国株との相関×S&P500の20日騰落)", "sec_us_tail20": "業種全体の米国株の追い風(中央値)", "sec_disc_ret": "同業種で直近10日に決算発表した銘柄の株価反応(中央値)", "riskoff5": "リスクオフの総合点(5日で円高・VIX上昇・米金利低下・米株安の数)", "riskoff_off": "リスクオフの和らぎ(総合点-直近5日の最大)", "mkt_share": "20日の下げのうち市場全体で説明できる割合(ベータ×市場の騰落)", "sec_share": "20日の下げのうち業種全体で説明できる割合", "pm_ret": "前月の月間騰落", "mtd_ret": "月初来の騰落(前月末から)", "lim_dn20": "直近20日でストップ安付近で引けた日数", "lim_up20": "直近20日でストップ高付近で引けた日数", "gold_corr60": "金(ETF)との60日相関", "gold_tail20": "金の追い風(金との相関×金の20日騰落)", "beta_up60": "市場が上げた日だけの60日ベータ", "beta_dn60": "市場が下げた日だけの60日ベータ", "beta_asym": "上げの日のベータ−下げの日のベータ", "up_day_xs20": "直近20日の市場が上げた日の超過騰落(平均)", "vix_rv_gap": "VIX(前日)−日経225の20日実現ボラ", "dn_day_xs20": "直近20日の市場が下げた日の超過騰落(平均)", "updn_xs20": "上げた日の超過騰落−下げた日の超過騰落", "sec_up_xs20": "業種内の市場が上げた日の超過騰落(中央値)", "up_xs_rel": "市場が上げた日の超過騰落−業種の中央値", "pbr_cross1": "急落でPBR1倍を新たに割った(20日前は1倍超)", "pbr_vs1": "PBR−1", "mkt_pbr1_frac": "市場全体でPBR1倍割れの銘柄の割合", "mkt_pbr1_chg20": "PBR1倍割れの銘柄の割合の20日変化",
+    "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数", "mkt_rv_off": "市場全体のボラ拡大-直近5日の最大値(乱高下の峠越え)", "mkt_speed": "市場全体の下げの速さ(5日騰落/20日騰落の中央値)", "sales_yld": "予想売上高/時価総額(PSRの逆数)", "mkt_dn_tv": "市場全体の売買代金のうち下落銘柄の割合", "mkt_dn_tv5": "市場全体の売買代金のうち下落銘柄の割合(5日平均)", "disc_season": "直近10日以内に決算発表した銘柄の割合(決算シーズン)", "mkt_disc_ret": "直近10日の決算発表銘柄の株価反応(中央値)", "round_up": "上の切りのよい株価(桁の半分単位)までの距離", "fx_tail20": "為替の追い風(為替感応度×ドル円の20日変化)", "rate_corr60": "日本10年金利の上昇との60日相関(金利感応度)", "rate_tail20": "金利の追い風(金利感応度×10年金利の20日変化)", "fx_tail5": "為替の短期の追い風(為替感応度×ドル円の5日変化)", "oil_tail20": "原油の追い風(原油との相関×WTIの20日騰落)", "sec_fx_tail20": "業種全体の為替の追い風(中央値)", "fx_tail_rel": "為替の追い風-業種の中央値", "us_tail20": "米国株の追い風(米国株との相関×S&P500の20日騰落)", "sec_us_tail20": "業種全体の米国株の追い風(中央値)", "sec_disc_ret": "同業種で直近10日に決算発表した銘柄の株価反応(中央値)", "riskoff5": "リスクオフの総合点(5日で円高・VIX上昇・米金利低下・米株安の数)", "riskoff_off": "リスクオフの和らぎ(総合点-直近5日の最大)", "mkt_share": "20日の下げのうち市場全体で説明できる割合(ベータ×市場の騰落)", "sec_share": "20日の下げのうち業種全体で説明できる割合", "pm_ret": "前月の月間騰落", "mtd_ret": "月初来の騰落(前月末から)", "lim_dn20": "直近20日でストップ安付近で引けた日数", "lim_up20": "直近20日でストップ高付近で引けた日数", "gold_corr60": "金(ETF)との60日相関", "gold_tail20": "金の追い風(金との相関×金の20日騰落)", "beta_up60": "市場が上げた日だけの60日ベータ", "beta_dn60": "市場が下げた日だけの60日ベータ", "beta_asym": "上げの日のベータ−下げの日のベータ", "up_day_xs20": "直近20日の市場が上げた日の超過騰落(平均)", "vix_rv_gap": "VIX(前日)−日経225の20日実現ボラ", "dn_day_xs20": "直近20日の市場が下げた日の超過騰落(平均)", "updn_xs20": "上げた日の超過騰落−下げた日の超過騰落", "sec_up_xs20": "業種内の市場が上げた日の超過騰落(中央値)", "up_xs_rel": "市場が上げた日の超過騰落−業種の中央値", "pbr_cross1": "急落でPBR1倍を新たに割った(20日前は1倍超)", "pbr_vs1": "PBR−1", "mkt_pbr1_frac": "市場全体でPBR1倍割れの銘柄の割合", "mkt_pbr1_chg20": "PBR1倍割れの銘柄の割合の20日変化", "is_def": "ディフェンシブ業種(食料品・医薬品・電気ガス・陸運)", "def_sp20": "ディフェンシブ業種−それ以外の20日騰落の差(中央値)", "def_sp5": "ディフェンシブ業種−それ以外の5日騰落の差(中央値)",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1442,6 +1456,8 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
+    if f == "is_def":
+        return "ディフェンシブ業種" if op == ">=" else "ディフェンシブ業種以外"
     if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
