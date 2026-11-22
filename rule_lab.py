@@ -2186,6 +2186,25 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
     if "sector" in q.columns:
         sec = q.loc[t.index, "sector"].value_counts()
         md.append("- 業種の上位：" + "、".join(f"{s} {n}回" for s, n in sec.head(5).items()))
+        # 担当2(46周目)：「製造業」が業種のつまみ食いでないか。製造業の条件を外した版で業種ごとの成績を出す
+        # （製造業の中で勝率がそろい、製造業以外が一様に低ければ意味のある条件。製造業の中でばらつけば偶然の疑い）。情報用
+        try:
+            _nm = [c_ for c_ in conds if c_[0] != "mfg"]
+            if len(_nm) < len(conds):
+                _tm = dedup_trades(q, apply(q, _nm))
+                _tm = _tm.assign(sector=q.loc[_tm.index, "sector"].to_numpy(), mfg=q.loc[_tm.index, "mfg"].to_numpy(),
+                                 dd_=pd.to_datetime(_tm["date"]).dt.normalize())
+                _g = _tm.groupby("sector").agg(n=("win", "size"), w=("win", "mean"), p=("pnl", "mean"),
+                                               m=("mfg", "max"), d=("dd_", "nunique")).sort_values("n", ascending=False)
+                md += ["", "## 業種別の成績（製造業の条件を外した版。情報用）", "",
+                       f"- 製造業の条件を外した版：{len(_tm)}件 {pct(_tm['win'].mean())}。うち製造業 {int((_tm['mfg'] == 1).sum())}件 "
+                       f"{pct(_tm.loc[_tm['mfg'] == 1, 'win'].mean())}・製造業以外 {int((_tm['mfg'] != 1).sum())}件 "
+                       f"{pct(_tm.loc[_tm['mfg'] != 1, 'win'].mean())}", "",
+                       "| 業種 | 製造業 | 取引数 | 信号日数 | 勝率 | 平均損益 |", "|---|---|---|---|---|---|"]
+                md += [f"| {s_} | {'○' if r_['m'] == 1 else ''} | {int(r_['n'])} | {int(r_['d'])} | {pct(r_['w'])} | {pct(r_['p'], 2)} |"
+                       for s_, r_ in _g[_g["n"] >= 3].head(25).iterrows()]
+        except Exception as e:
+            md += ["", f"（業種別の成績の集計は失敗：{e}）"]
 
     def row(lbl, r):
         sp = r.get("splits") or []
