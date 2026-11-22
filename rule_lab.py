@@ -837,6 +837,25 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
         q["mkt_corr_avg"] = q.groupby("date")["mkt_corr20"].transform("mean")
     else:
         q["mkt_corr20"] = q["mkt_corr_chg"] = q["mkt_corr_avg"] = np.nan
+    # 仮説(2026-11-22 53回目 担当1)：季節性・投資家心理
+    #  disc_season 市場全体で直近10日以内に決算を発表した銘柄の割合（決算シーズンの最中か）
+    #  mkt_disc_ret 直近10日以内に発表した銘柄の決算反応(disc_ret)の中央値（その決算シーズンの地合い。20銘柄以上の日のみ）
+    #  round_up 上の切りのよい株価（桁の半分単位：1234円→1500円）までの距離（+10%の手前に節目があるか）
+    if "since_disc" in q.columns:
+        _rec = (q["since_disc"] <= 10)
+        q["disc_season"] = q["date"].map(_rec.groupby(q["date"]).mean())
+        if "disc_ret" in q.columns:
+            _dr = q["disc_ret"].where(_rec)
+            _cnt = _dr.groupby(q["date"]).count()
+            q["mkt_disc_ret"] = q["date"].map(_dr.groupby(q["date"]).median().where(_cnt >= 20))
+        else:
+            q["mkt_disc_ret"] = np.nan
+    else:
+        q["disc_season"] = np.nan
+        q["mkt_disc_ret"] = np.nan
+    _c = q["close"].where(q["close"] > 0)
+    _unit = (10.0 ** np.floor(np.log10(_c))) / 2
+    q["round_up"] = (np.floor(_c / _unit) + 1) * _unit / _c - 1
     cnum =pd.to_numeric(q["code"].str[:4], errors="coerce")
     q["etf"] = cnum.between(1300, 1699) | cnum.between(2500, 2599)
     # 結果（未来）: 翌日始値で買い、t+1..t+20 の高値最大
@@ -1095,6 +1114,9 @@ GRID = {
     "sales_yld": [(">=", 2.0), (">=", 1.0), ("<=", 0.3)],
     "mkt_dn_tv": [(">=", 0.8), (">=", 0.7), ("<=", 0.3)],
     "mkt_dn_tv5": [(">=", 0.65), (">=", 0.6), ("<=", 0.4)],
+    "disc_season": [(">=", 0.3), (">=", 0.15), ("<=", 0.03)],
+    "mkt_disc_ret": [(">=", 0.02), (">=", 0.0), ("<=", -0.02)],
+    "round_up": [("<=", 0.03), ("<=", 0.08), (">=", 0.2)],
 }
 
 LABEL = {
@@ -1182,7 +1204,7 @@ LABEL = {
     "sec_vol_exp": "業種内のボラ拡大(5日/60日)の中央値",
     "engulf": "陽の包み足(前日陰線を当日陽線が包む)", "ll_streak": "安値の連続切り下げ日数", "rnd_up": "直下の価格の節目(100円・1000円など)からの距離",
     "sec_lead5": "業種内の大型株(時価総額上位3割)の5日騰落-業種全体(中央値)", "prior_crash": "2度目の急落(t-60〜t-21に20日騰落-15%以下の日あり=1)",
-    "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数", "mkt_rv_off": "市場全体のボラ拡大-直近5日の最大値(乱高下の峠越え)", "mkt_speed": "市場全体の下げの速さ(5日騰落/20日騰落の中央値)", "sales_yld": "予想売上高/時価総額(PSRの逆数)", "mkt_dn_tv": "市場全体の売買代金のうち下落銘柄の割合", "mkt_dn_tv5": "市場全体の売買代金のうち下落銘柄の割合(5日平均)",
+    "eff20": "20日の値動きの効率(|20日騰落|/日次騰落の絶対値の合計)", "vwap_dev20": "20日の出来高加重平均価格(VWAP)からの乖離", "sec_lo60_off": "業種内の60日安値割合-直近5日の最大値(投げ売りのピーク越え)", "mkt_rv_exp": "市場全体のボラ拡大(前日比の中央値の5日/60日標準偏差)", "lh_streak": "高値の連続切り下げ日数", "mkt_rv_off": "市場全体のボラ拡大-直近5日の最大値(乱高下の峠越え)", "mkt_speed": "市場全体の下げの速さ(5日騰落/20日騰落の中央値)", "sales_yld": "予想売上高/時価総額(PSRの逆数)", "mkt_dn_tv": "市場全体の売買代金のうち下落銘柄の割合", "mkt_dn_tv5": "市場全体の売買代金のうち下落銘柄の割合(5日平均)", "disc_season": "直近10日以内に決算発表した銘柄の割合(決算シーズン)", "mkt_disc_ret": "直近10日の決算発表銘柄の株価反応(中央値)", "round_up": "上の切りのよい株価(桁の半分単位)までの距離",
 }
 POINT_FEATS = {"rate_sp", "jgb2y_chg20", "us10y_chg5", "vix_chg1", "spread_chg20", "vix", "vix_chg5", "us10y_chg20", "jgb10y_chg20", "jgb_slope", "adr25", "lev_z"}
 DOW = "月火水木金"
@@ -1218,7 +1240,7 @@ def fmt_cond(f, op, th):
         return {1: "プライム", 2: "スタンダード", 3: "グロース"}.get(int(th), lab) if op == "==" else f"{lab} {op} {th:g}"
     if f == "mfg":
         return "製造業" if op == ">=" else "非製造業"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
