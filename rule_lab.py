@@ -2108,6 +2108,33 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
                     md.append(f"| {lbl_} | {n_top}件 | {len(s_)} | {pct(s_['win'].mean())} | {pct(s_['pnl'].mean(), 2)} |")
     except Exception as e:
         md += ["", f"（1日あたり上位N件の集計は失敗：{e}）"]
+    # 担当2(44周目)：業種・市場区分は「現在の」上場一覧から付けるため、その後に上場廃止になった銘柄は業種「不明」・区分なしとなり、
+    # 製造業・グロース以外・同業種の条件で必ず外れる（生存者の偏り）。業種・区分を使わない条件だけにして、
+    # 一覧に無い銘柄の成績が一覧にある銘柄と比べて悪くないかを見る（情報用。採用判定には使わない）
+    try:
+        _sec_f = {"mkt_seg", "mfg", "is_def"}
+        _rc = [c_ for c_ in conds if c_[0] not in _sec_f and not str(c_[0]).startswith("sec")]
+        _unk = (q["sector"] == "不明") if "sector" in q.columns else pd.Series(False, index=q.index)
+        _ncode_all = q["code"].nunique()
+        _ncode_unk = q.loc[_unk, "code"].nunique()
+        md += ["", "## 上場一覧に無い銘柄（上場廃止など）の点検（情報用：業種・市場区分は現在の一覧から付けるため）", "",
+               f"- 期間中の銘柄 {_ncode_all} のうち、現在の上場一覧に無く業種「不明」となる銘柄 {_ncode_unk}（ETF等を含む）。"
+               "これらは採用ルールの製造業・グロース以外・同業種の条件で必ず外れる",
+               "- 下の表は採用ルールから業種・市場区分を使う条件を外した版：" + (" かつ ".join(fmt_cond(*c_) for c_ in _rc) or "（なし）"), "",
+               "| 対象 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
+        _m_rc = apply(q, _rc)
+        _on_sd = pd.to_datetime(q["date"]).dt.normalize().isin(sd_)
+        for lbl_, mk_ in (("全期間・上場一覧にある銘柄", _m_rc & ~_unk), ("全期間・上場一覧に無い銘柄", _m_rc & _unk),
+                          ("採用ルールの信号日・上場一覧にある銘柄", _m_rc & ~_unk & _on_sd),
+                          ("採用ルールの信号日・上場一覧に無い銘柄", _m_rc & _unk & _on_sd)):
+            tt_ = dedup_trades(q, mk_)
+            md.append(f"| {lbl_} | {len(tt_)} | {pct(tt_['win'].mean()) if len(tt_) else '-'} | "
+                      f"{pct(tt_['pnl'].mean(), 2) if len(tt_) else '-'} |")
+        # 保有中に値が途切れた取引（勝ち負けが付かず集計から落ちる）：業種・区分を外した版の条件で
+        _nowin = int((_m_rc & q["win"].isna() & (pd.to_datetime(q["date"]) < pd.to_datetime(q["date"]).max() - pd.Timedelta(days=40))).sum())
+        md.append(f"- 同じ条件で、最終日より40日以上前なのに勝ち負けが付かない（保有中に値が途切れた）行：{_nowin}")
+    except Exception as e:
+        md += ["", f"（上場一覧に無い銘柄の点検は失敗：{e}）"]
     # 相場の状態別：市場全体の下げの長さ・深さで分けた成績（長い下げ相場でも効くか）
     md += ["", "## 相場の状態別（市場全体の下げの長さ・深さ）", "", "| 区分 | 取引数 | 勝率 | 平均損益 |", "|---|---|---|---|"]
     for f_, cuts, unit in (("mkt_hi_days", [-1, 10, 30, 60, 1e9], "日"), ("mkt_dd120", [-1, -0.2, -0.1, -0.05, 1], ""),
