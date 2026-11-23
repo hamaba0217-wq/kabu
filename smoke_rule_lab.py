@@ -13,6 +13,10 @@ import rule_lab as R
 tmp = tempfile.mkdtemp()
 R.RULES_MD = os.path.join(tmp, "t.md")
 R.RULES_HTML = os.path.join(tmp, "t.html")
+R.SIG_HTML = os.path.join(tmp, "sig.html")      # 本物の docs/ を書き換えないよう一時フォルダへ
+R.INDEX_HTML = os.path.join(tmp, "index.html")
+open(R.INDEX_HTML, "w", encoding="utf-8").write(
+    '<div class="nav"><a href="index.html">今日の候補</a></div><h1>t</h1><div class="date-badge">基準日</div><p>x</p>')
 rng = np.random.default_rng(0)
 dates = pd.bdate_range("2023-01-02", periods=420)
 codes = [f"{1000 + c}0" for c in range(150)] + ["15400", "25100", "15700", "13570", "13210", "13430"]
@@ -38,6 +42,9 @@ for cs in cands[:30]:
 st = {"champion": {"conds": [], **base}, "history": [], "tested": {}, "baseline": base,
       "updated": "test", "singles": R.single_report(q, edges, base)}
 R.write_outputs(st, q, q["date"].max())
+R.write_outputs(st, q, q["date"].max())   # 2回目は欄の差し替え（重複しないこと）
+_ix = open(R.INDEX_HTML, encoding="utf-8").read()
+assert _ix.count(R.SIG_START) == 1 and 'href="rules.html"' in _ix, "トップページの欄・メニューの差し込みに失敗"
 R.robustness_report(q, [["ret20", "<=", -0.1], ["hammer5", ">=", 1]], edges, base, path=os.path.join(tmp, "rb.md"))
 print(open(os.path.join(tmp, "rb.md"), encoding="utf-8").read()[:600])
 missing = [f for f in R.GRID if f not in q.columns]

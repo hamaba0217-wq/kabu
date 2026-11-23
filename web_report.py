@@ -305,9 +305,19 @@ def _page(title, active, body):
 
 
 # ---- 今日の候補ページ（index.html）------------------------------------
+def _rule_signals_block():
+    """rule_lab.py が毎時作る「勝率がいちばん高いルールに当てはまる銘柄」の欄（docs/_rule_signals.html）"""
+    try:
+        with open(os.path.join(DOCS, "_rule_signals.html"), encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
 def _build_index(df, target_date, quotes=None):
     body = [f'<h1>今日の株式運用候補 ＆ 指値プラン</h1>',
             f'<div class="date-badge">基準日: {_esc(target_date)}</div>',
+            _rule_signals_block(),
             '<h2>💡 検証方法・アプローチ別の特徴とおすすめ</h2>',
             '''<div class="strategy-container">
         <div class="strategy-card">

@@ -27,6 +27,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -2101,10 +2102,92 @@ def pct(x, d=1):
     return "-" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{x*100:.{d}f}%"
 
 
-def today_signals(q, conds, last_date):
+def today_signals(q, conds, last_date, limit=30):
     m = apply(q, conds) & (q["date"] == last_date)
     s = q.loc[m, ["code", "sector", "close", "ret1", "ret20", "vratio", "tv20"]].copy()
-    return s.sort_values("tv20", ascending=False).head(30)
+    s = s.sort_values("tv20", ascending=False)
+    return s.head(limit) if limit else s
+
+
+# トップページ（docs/index.html）に載せる「勝率がいちばん高いルールに当てはまる銘柄」の欄
+SIG_HTML = os.path.join("docs", "_rule_signals.html")   # 欄だけのHTML（web_report.py もこれを読み込む）
+INDEX_HTML = os.path.join("docs", "index.html")
+SIG_START, SIG_END = "<!--RULE_SIGNALS_START-->", "<!--RULE_SIGNALS_END-->"
+
+
+def _code4(c):
+    c = str(c)
+    return c[:4] if len(c) == 5 and c.endswith("0") else c
+
+
+def top_signals_html(state, q, last_date):
+    """採用ルールに直近データ日で当てはまる銘柄の欄（トップページ用）。情報として出すだけ"""
+    from html import escape
+    champ = state["champion"]
+    allsig = today_signals(q, champ["conds"], last_date, limit=None)
+    names = {}
+    try:
+        import cache
+        lst = cache.load("listed")
+        if lst is not None and "company_name" in lst.columns:
+            names = dict(zip(lst["code"].astype(str), lst["company_name"].astype(str)))
+    except Exception:
+        pass
+    head = (f"<h2>🎯 勝率がいちばん高いルールに当てはまる銘柄（データ日 {last_date.date()}）</h2>"
+            f"<div class='card strong'><div class='stat'>研究で見つけた現在のルール：過去5年の勝率 <b>{pct(champ['win'])}</b>"
+            f"（取引数 {champ['n']}、平均損益 {pct(champ['pnl'],2)}。条件なしの勝率は {pct(state.get('baseline', {}).get('win'))}）。"
+            f"売買方法は、データ日の<b>翌営業日の始値</b>で買い、買値の<b>+10%に売りの指値</b>、"
+            f"{HOLD}営業日以内に届かなければ{HOLD}営業日目の終値で売る。"
+            f"条件と点検結果は <a href='rules.html'>🎯 勝率改善ルール</a> へ。"
+            f"<br>更新 {state['updated']}（毎時自動）</div>")
+    if len(allsig):
+        rows = "".join(
+            f"<tr><td>{escape(names.get(str(r.code), ''))}</td><td>{escape(_code4(r.code))}</td><td>{escape(str(r.sector))}</td>"
+            f"<td data-v='{r.close}'>{r.close:,.0f}</td><td data-v='{r.ret1}'>{pct(r.ret1)}</td>"
+            f"<td data-v='{r.ret20}'>{pct(r.ret20)}</td></tr>"
+            for r in allsig.head(50).itertuples())
+        more = (f"<div class='stat'>ほか {len(allsig) - 50} 銘柄は売買代金の小さい順に省略しています。</div>"
+                if len(allsig) > 50 else "")
+        body = (f"<div class='stat'><b>{len(allsig)}銘柄</b>が当てはまりました（売買代金の大きい順）。</div>"
+                "<div class='tablewrap'><table><thead><tr><th data-sortable>銘柄名</th><th data-sortable>コード</th>"
+                "<th data-sortable>業種</th><th data-sortable>終値</th><th data-sortable>前日比</th>"
+                f"<th data-sortable>20日騰落</th></tr></thead><tbody>{rows}</tbody></table></div>{more}")
+    else:
+        prev = ""
+        try:
+            m = apply(q, champ["conds"])
+            d = q.loc[m, "date"]
+            if len(d):
+                ld = d.max()
+                prev = f"直近で当てはまった日は {ld.date()}（{int((d == ld).sum())}銘柄）です。"
+        except Exception:
+            pass
+        body = ("<div class='stat'><b>該当なし</b>。このルールは相場全体が急落した日にだけ銘柄が出ます"
+                f"（過去5年で約20日）。{prev}</div>")
+    note = ("<div class='note'>過去データの統計で、多数のルールを試した中から選んでいるため、実際の勝率は表示より下がる可能性があります。"
+            "手数料・税は未考慮。投資助言ではありません。売買の判断と結果責任は利用者にあります。</div></div>")
+    return f"{SIG_START}\n{head}{body}{note}\n{SIG_END}"
+
+
+def write_top_signals(state, q, last_date):
+    """欄を docs/_rule_signals.html に保存し、docs/index.html の該当部分を差し替える（無ければ見出しの下に入れる）"""
+    block = top_signals_html(state, q, last_date)
+    open(SIG_HTML, "w", encoding="utf-8").write(block)
+    if not os.path.exists(INDEX_HTML):
+        return
+    t = open(INDEX_HTML, encoding="utf-8").read()
+    if SIG_START in t and SIG_END in t:
+        a = t.index(SIG_START); b = t.index(SIG_END) + len(SIG_END)
+        t = t[:a] + block + t[b:]
+    else:
+        m = re.search(r'<div class="date-badge">.*?</div>', t, flags=re.S) or re.search(r"</h1>", t)
+        if not m:
+            return
+        t = t[:m.end()] + "\n" + block + t[m.end():]
+    # メニューに「勝率改善ルール」が無い古いトップページなら足す
+    if 'href="rules.html"' not in t:
+        t = re.sub(r'(<div class="nav">.*?)(</div>)', r'\1<a href="rules.html">🎯 勝率改善ルール</a>\2', t, count=1, flags=re.S)
+    open(INDEX_HTML, "w", encoding="utf-8").write(t)
 
 
 def single_report(q, edges, base):
@@ -2209,6 +2292,10 @@ def write_outputs(state, q, last_date):
 """
     html = _page("勝率改善ルール", "rules", body) if _page else f"<!doctype html><meta charset=utf-8><body>{body}"
     open(RULES_HTML, "w", encoding="utf-8").write(html)
+    try:
+        write_top_signals(state, q, last_date)
+    except Exception as e:
+        print("トップページの欄の更新に失敗（ルールページは更新済み）:", e)
 
 
 ROBUST_MD = os.path.join("rules", "robustness.md")
@@ -2855,7 +2942,8 @@ def git_push(msg):
         r = subprocess.run(["git", *a], capture_output=True, text=True)
         print("git", " ".join(a), "->", r.returncode, (r.stdout + r.stderr).strip()[:300])
         return r.returncode
-    run("add", *[p for p in (RULES_MD, RULES_HTML, STATE, os.path.join("rules", "feature_report.md"), ROBUST_MD, ROBUST_HTML)
+    run("add", *[p for p in (RULES_MD, RULES_HTML, STATE, os.path.join("rules", "feature_report.md"), ROBUST_MD, ROBUST_HTML,
+                             SIG_HTML, INDEX_HTML)
                  if os.path.exists(p)])
     if run("commit", "-m", msg) != 0:
         return
