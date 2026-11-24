@@ -842,6 +842,8 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     _am5 = am.groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=4).mean())
     _am60 = am.groupby(q["code"]).transform(lambda s: s.rolling(60, min_periods=40).mean())
     q["illiq_chg"] = (_am5 / _am60.replace(0, np.nan))
+    # 96周目：期間の取り方の確認（10日平均/60日平均）
+    q["illiq10_chg"] = am.groupby(q["code"]).transform(lambda s: s.rolling(10, min_periods=8).mean()) / _am60.replace(0, np.nan)
     # 88周目：市場全体の流動性の急変（全銘柄の illiq_chg の中央値）と、市場に対する銘柄の流動性の急変の比（その銘柄だけ商いが細ったか）
     q["mkt_illiq_chg"] = q.groupby("date")["illiq_chg"].transform("median")
     q["illiq_chg_rel"] = q["illiq_chg"] / q["mkt_illiq_chg"].replace(0, np.nan)
@@ -1673,6 +1675,7 @@ GRID = {
     "mkt_illiq_chg": [(">=", 1.1), (">=", 1.0), ("<=", 0.9)],
     "illiq_chg_rel": [(">=", 2.0), (">=", 1.3), ("<=", 0.8)],
     "illiq1_chg": [(">=", 3.0), (">=", 1.5), ("<=", 0.7)],
+    "illiq10_chg": [(">=", 2.0), (">=", 1.2), ("<=", 0.8)],
     "illiq_asym20": [(">=", 2.0), (">=", 1.3), ("<=", 0.8)],
     # 仮説(2026-11-22 26回目)：ボラで割った下げの深さ・窓を開けて下げた日の日中の戻り・60日安値からの経過日数
     "z_drop20":  [("<=", -2.5), ("<=", -1.5), (">=", 0.0)],
@@ -1957,7 +1960,7 @@ LABEL = {
     "sales_yoy": "売上高の前年同期比(直近の決算)", "sec_wide": "急落が広がった業種の割合(市場全体)",
     "bounce5": "直近5日の安値からの戻り", "crash_speed": "下げの集中度(5日騰落/20日騰落)",
     "vol_climax": "出来高のクライマックス(当日/前60日の最大)",
-    "skew60": "日次騰落の歪度(60日)", "illiq20": "非流動性(|日次騰落|/売買代金億円, 20日平均)", "illiq_chg": "流動性の急変(Amihud非流動性の5日平均/60日平均)", "dn_tv_share20": "下げ日の売買代金の割合(20日)", "mkt_illiq_chg": "市場全体の流動性の急変(銘柄のAmihud5日/60日の中央値)", "illiq_chg_rel": "市場に対する流動性の急変(銘柄/市場の中央値)", "illiq1_chg": "判定日当日の値の飛び方(当日のAmihud/60日平均)", "illiq_asym20": "下げ日と上げ日の値の飛びやすさの比(Amihud、20日)",
+    "skew60": "日次騰落の歪度(60日)", "illiq20": "非流動性(|日次騰落|/売買代金億円, 20日平均)", "illiq_chg": "流動性の急変(Amihud非流動性の5日平均/60日平均)", "dn_tv_share20": "下げ日の売買代金の割合(20日)", "mkt_illiq_chg": "市場全体の流動性の急変(銘柄のAmihud5日/60日の中央値)", "illiq_chg_rel": "市場に対する流動性の急変(銘柄/市場の中央値)", "illiq1_chg": "判定日当日の値の飛び方(当日のAmihud/60日平均)", "illiq10_chg": "流動性の急変(Amihud非流動性の10日平均/60日平均)", "illiq_asym20": "下げ日と上げ日の値の飛びやすさの比(Amihud、20日)",
     "xs_skew5": "市場全体の5日騰落の歪度(全銘柄)",
     "z_drop20": "ボラで割った20日騰落(20日騰落/(60日ボラ×√20))", "gap_rec": "窓を開けて下げた日の日中の戻り(窓≤-2%)",
     "lo_days60": "60日安値からの経過日数",
