@@ -46,7 +46,13 @@ jobs:
           LIGHT_MODE: "1"
       - name: 勝率の高い順 上位10銘柄・海外市場・チャート（トップページの欄）
         run: python -u rule_lab.py --no-fetch --page-only
-      - uses: stefanzweifel/git-auto-commit-action@v6
-        with:
-          commit_message: "トップページ更新（今日の候補・上位10銘柄）"
-          branch: main
+      - name: 保存（毎時のルール探索と同時に push しても失敗しないよう、取り込んでから push）
+        run: |
+          git config user.name "top-page-bot"
+          git config user.email "top-page-bot@users.noreply.github.com"
+          git add -A docs rules history
+          git commit -m "トップページ更新（今日の候補・上位10銘柄）" || exit 0
+          for i in 1 2 3; do
+            git pull --rebase -X theirs origin main && git push origin HEAD:main && break
+            sleep 15
+          done

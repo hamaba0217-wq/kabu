@@ -16,6 +16,7 @@
 | 研究の記録 | rules/research_log.md | 研究担当のAIが追記 |
 | 速報（PCの手元データ・短期間）で仮説をすぐ確かめる | quick_lab.py → rules/quick_report.md | PCの研究担当（data/ がある環境のみ） |
 | 有望な組み合わせを Actions に優先検証させる | rules/seeds.json | 研究担当が追記。rule_lab.py が最優先で検証 |
+| トップページ（今日の候補・勝率の高い順 上位10銘柄・海外市場・チャート） | web_report.py ＋ rule_lab.py --page-only → docs/index.html | GitHub Actions `top_page.yml`（平日 朝8時・16時。利用者指定。毎時の rule_lab はトップの欄を変えない） |
 
 **勝ちの定義（利用者指定・変更禁止）**：シグナル翌営業日の始値で買い、20営業日以内に高値が+10%に届けば勝ち。届かなければ20営業日目の終値で売る。
 
