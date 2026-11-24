@@ -258,6 +258,16 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         x = x[~x.index.duplicated(keep="last")]
         al = x.reindex(x.index.union(dates)).ffill().reindex(dates)
         ctx = ctx.join(al)
+        # 仮説(2026-11-24 担当1 85周目・利用者テーマB)：前夜の米国市場＝米国の t 日（日本の判定日と同じ暦日）の値動き。
+        # 米国 t 日の終値は日本時間 t+1 の朝6時ごろ確定し、t+1 の始値で買う前に分かる（t の引けの時点では未確定）。
+        # 判定日 t の終値で確定する値ではないため GRID には入れず、quick_lab --combo で別枠として調べる（列名 on_ で始まる）。
+        on = pd.DataFrame(index=m.index)
+        on["on_spx1"] = m["sp500"].pct_change(1)
+        on["on_ndx1"] = m["nasdaq"].pct_change(1)
+        on["on_vix1"] = m["vix"].diff()
+        on["on_fx1"] = m["usdjpy"].pct_change(1)
+        on = on[~on.index.duplicated(keep="last")]
+        ctx = ctx.join(on.reindex(on.index.union(dates)).ffill().reindex(dates))
     # 仮説(53回目19周目 担当1)：恐怖の割高度＝VIX(前日) − 日経225の20日実現ボラ。プラス=米国の不安が日本の実際の値動きより大きい、
     # マイナス=日本だけ実際の値動きが荒れている（日本固有の投げ）
     ctx["vix_rv_gap"] = (ctx["vix"] - ctx["nk_rv20"]) if {"vix", "nk_rv20"} <= set(ctx.columns) else np.nan
