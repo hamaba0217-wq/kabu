@@ -348,7 +348,7 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
     def _sq(y, mth):
         d = pd.Timestamp(year=y, month=mth, day=1)
         return d + pd.Timedelta(days=(4 - d.dayofweek) % 7 + 7)
-    sqd, dvd = [], []
+    sqd, dvd, dva = [], [], []
     for t in ctx.index:
         nx = _sq(t.year, t.month)
         if nx < t.normalize():
@@ -357,8 +357,14 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         sqd.append((nx - t.normalize()).days)
         cands = [pd.Timestamp(year=t.year + k, month=mm, day=1) + pd.offsets.MonthEnd(0) for k in (0, 1) for mm in (3, 9)]
         dvd.append(min((c_ - t.normalize()).days for c_ in cands if c_ >= t.normalize()))
+        # 仮説(2026-11-24 担当2 90周目)：直近の3月・9月の権利落ち日(月末の最終平日の1営業日前。祝日は無視)からの暦日数。
+        # 0〜小さい＝権利落ち直後で、20日騰落に配当落ちの分の見かけの下げが含まれる（86周目の宿題）。暦で決まるので先読みなし
+        pc_ = [pd.Timestamp(year=t.year - k, month=mm, day=1) + pd.offsets.MonthEnd(0) for k in (0, 1) for mm in (3, 9)]
+        pc_ = [(c_ - pd.offsets.BDay(0) if c_.dayofweek < 5 else c_ - pd.offsets.BDay(1)) - pd.offsets.BDay(1) for c_ in pc_]
+        dva.append(min((t.normalize() - c_).days for c_ in pc_ if c_ <= t.normalize()))
     ctx["sq_days"] = sqd
     ctx["div_days"] = dvd
+    ctx["div_after"] = dva
     ctx.index.name = "date"
     q = _ljoin(q, ctx.reset_index(), on="date", how="left")
     # --- 業種内での相対的な強さ ---
@@ -1698,6 +1704,7 @@ GRID = {
     "ret20_xr": [("<=", 0.02), ("<=", 0.05), (">=", 0.95)],
     "sq_days": [("<=", 4), ("<=", 10), (">=", 20)],
     "div_days": [("<=", 10), ("<=", 30), (">=", 90)],
+    "div_after": [("<=", 7), ("<=", 14), (">=", 30)],
     "sec_from_hi": [("<=", -0.30), ("<=", -0.20), (">=", -0.08)],
     "from_hi_rel": [("<=", -0.20), ("<=", -0.10), (">=", 0.0)],
     "rsi2": [("<=", 5), ("<=", 15), (">=", 90)],
@@ -1944,7 +1951,7 @@ LABEL = {
     "vmax_ret": "直近20日で出来高最大の日の騰落", "vmax_days": "直近20日で出来高最大の日からの経過日数",
     "ret10": "10日騰落",
     "size_sp5": "小型株-大型株の5日騰落の差(時価総額の下位3割-上位3割)", "val_sp20": "低PBR株-高PBR株の20日騰落の差(下位3割-上位3割)",
-    "ret20_xr": "20日騰落の全銘柄内の順位(0=最も下げた)", "sq_days": "次のSQ(第2金曜)までの暦日数", "div_days": "3月・9月末(配当の権利)までの暦日数",
+    "ret20_xr": "20日騰落の全銘柄内の順位(0=最も下げた)", "sq_days": "次のSQ(第2金曜)までの暦日数", "div_days": "3月・9月末(配当の権利)までの暦日数", "div_after": "直近の3月・9月の権利落ち日からの暦日数(0〜小さい=権利落ち直後)",
     "sec_from_hi": "業種の52週高値からの位置(中央値)", "from_hi_rel": "52週高値からの位置-業種の中央値",
     "rsi2": "2日RSI", "rsi_div": "20日安値圏でのRSI14の20日最低からの戻り(強気ダイバージェンス)", "mkt_ret1": "市場全体のその日の騰落(中央値)", "mkt_corr20": "市場全体(中央値)との20日相関", "mkt_corr_chg": "市場との20日相関−60日相関(連れ安の強まり)", "mkt_corr_avg": "全銘柄の市場との20日相関の平均(一斉に動く度合い)",
     "ndx_spx5": "ナスダック-S&P500の5日騰落の差(前日)", "usdjpy_dev60": "ドル円の60日平均からの乖離(前日)", "sec_rsi2": "業種内の2日RSIの中央値",
@@ -1979,7 +1986,7 @@ def fmt_cond(f, op, th):
         return f"{DOW[int(th)]}曜日"
     if f == "dom":
         return f"{lab} {op} {th:g}日"
-    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak", "stop_lo5", "stop_hi20", "mkt_hi_days", "gap_age", "mkt_gapdn20", "hi_age60"):
+    if f in ("days_hi20", "lo_days60", "mkt_dn_streak", "min1_days", "gap_dn_cnt20", "vmax_days", "sq_days", "div_days", "div_after", "sec_dn_streak", "sec_crash_days", "ll_streak", "lh_streak", "stop_lo5", "stop_hi20", "mkt_hi_days", "gap_age", "mkt_gapdn20", "hi_age60"):
         return f"{lab} {op} {th:g}日"
     if f == "since_disc":
         return f"{lab} {op} {th:g}日"
