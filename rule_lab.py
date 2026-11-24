@@ -834,7 +834,16 @@ def add_features(q: pd.DataFrame) -> pd.DataFrame:
     q["skew60"] = q.groupby("code", sort=False)["ret1"].transform(lambda s: s.rolling(60, min_periods=40).skew())
     am = (q["ret1"].abs() / (tv / 1e8).replace(0, np.nan))
     q["illiq20"] = am.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=15).mean())
-    xsk = q.groupby("date")["ret5"].skew().rename("xs_skew5")
+    # 仮説(2026-11-24 担当1 87周目)：流動性の急変（Amihud の5日平均/60日平均。大きい=薄い商いで値が飛んだ下げ、小さい=大商いをこなした下げ）・
+    # 下げ日の売買代金の割合（20日の売買代金のうち前日比マイナスの日の割合＝売りの集中）。どちらも t 終値で確定
+    _am5 = am.groupby(q["code"]).transform(lambda s: s.rolling(5, min_periods=4).mean())
+    _am60 = am.groupby(q["code"]).transform(lambda s: s.rolling(60, min_periods=40).mean())
+    q["illiq_chg"] = (_am5 / _am60.replace(0, np.nan))
+    _tvd = tv.where(q["ret1"] < 0, 0.0).where(q["ret1"].notna())
+    _tvd20 = _tvd.groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=15).sum())
+    _tva20 = tv.where(q["ret1"].notna()).groupby(q["code"]).transform(lambda s: s.rolling(20, min_periods=15).sum())
+    q["dn_tv_share20"] = (_tvd20 / _tva20.replace(0, np.nan))
+    xsk =q.groupby("date")["ret5"].skew().rename("xs_skew5")
     q = _ljoin(q, xsk, on="date", how="left")
     # 仮説(2026-11-22 26回目)：ボラで割った下げの深さ（20日騰落/(60日の日次ボラ×√20)＝その銘柄にとって異例の下げか）・
     # 窓を開けて下げた日の日中の戻り（(終値-始値)/(前日終値-始値)、窓≤-2%のみ）・60日安値からの経過日数。すべて t 終値時点で確定
@@ -1641,6 +1650,9 @@ GRID = {
     "skew60":    [(">=", 1.0), (">=", 0.3), ("<=", -0.5)],
     "illiq20":   [(">=", 0.005), (">=", 0.002), ("<=", 0.0005)],
     "xs_skew5":  [(">=", 1.0), ("<=", -1.0), ("<=", 0.0)],
+    # 仮説(2026-11-24 担当1 87周目)：流動性の急変（Amihud 5日/60日）・下げ日の売買代金の割合（20日）
+    "illiq_chg": [(">=", 2.5), (">=", 1.5), ("<=", 0.8)],
+    "dn_tv_share20": [(">=", 0.75), (">=", 0.6), ("<=", 0.4)],
     # 仮説(2026-11-22 26回目)：ボラで割った下げの深さ・窓を開けて下げた日の日中の戻り・60日安値からの経過日数
     "z_drop20":  [("<=", -2.5), ("<=", -1.5), (">=", 0.0)],
     "gap_rec":   [(">=", 1.0), (">=", 0.5), ("<=", 0.0)],
@@ -1921,7 +1933,7 @@ LABEL = {
     "sales_yoy": "売上高の前年同期比(直近の決算)", "sec_wide": "急落が広がった業種の割合(市場全体)",
     "bounce5": "直近5日の安値からの戻り", "crash_speed": "下げの集中度(5日騰落/20日騰落)",
     "vol_climax": "出来高のクライマックス(当日/前60日の最大)",
-    "skew60": "日次騰落の歪度(60日)", "illiq20": "非流動性(|日次騰落|/売買代金億円, 20日平均)",
+    "skew60": "日次騰落の歪度(60日)", "illiq20": "非流動性(|日次騰落|/売買代金億円, 20日平均)", "illiq_chg": "流動性の急変(Amihud非流動性の5日平均/60日平均)", "dn_tv_share20": "下げ日の売買代金の割合(20日)",
     "xs_skew5": "市場全体の5日騰落の歪度(全銘柄)",
     "z_drop20": "ボラで割った20日騰落(20日騰落/(60日ボラ×√20))", "gap_rec": "窓を開けて下げた日の日中の戻り(窓≤-2%)",
     "lo_days60": "60日安値からの経過日数",
