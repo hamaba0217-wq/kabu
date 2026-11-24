@@ -424,6 +424,26 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
             q = q.drop(columns=["long_margin", "short_margin", "_l4", "_s4", "_avail"])
     except Exception as e:
         print(f"[警告] 信用残データなし: {e}")
+    # 仮説(2026-11-25 担当1 100周目)：決算期末までの月数（季節性。期末前の配当・株主優待の権利取り、期末後の決算待ち）。
+    # t までに開示された本決算(FY)の period_end の月を決算月とし、(決算月 − t の月) mod 12（0=決算月の当月）
+    q["fye_months"] = np.nan
+    try:
+        import cache
+        _fy = cache.load("fin")
+        if _fy is not None and {"period_end", "period_type"} <= set(_fy.columns):
+            _fy = _fy[_fy["period_type"] == "FY"][["code", "disclosed_date", "period_end"]].dropna().copy()
+            _fy["code"] = _fy["code"].astype(str)
+            _fy["disclosed_date"] = pd.to_datetime(_fy["disclosed_date"])
+            _fy["_fym"] = pd.to_datetime(_fy["period_end"]).dt.month.astype(float)
+            _fy = _fy.drop_duplicates(["code", "disclosed_date"], keep="last").sort_values("disclosed_date")[["code", "disclosed_date", "_fym"]]
+            q = q.drop(columns=["fye_months"]).sort_values("date")
+            q = pd.merge_asof(q, _fy.rename(columns={"disclosed_date": "_d_fy"}),
+                              left_on="date", right_on="_d_fy", by="code", direction="backward")
+            q = q.sort_values(["code", "date"]).reset_index(drop=True)
+            q["fye_months"] = ((q["_fym"] - q["date"].dt.month) % 12).where(q["_fym"].notna())
+            q = q.drop(columns=["_d_fy", "_fym"])
+    except Exception as e:
+        print(f"[警告] 決算月データなし: {e}")
     # 仮説(2026-11-21 7回目)：PBR・会社予想（営業利益）の修正率（発表日当日までに開示された値のみ）
     try:
         import cache
@@ -669,6 +689,18 @@ def add_context(q: pd.DataFrame) -> pd.DataFrame:
         q["gold_tail20"] = q["gold_corr60"] * q["gold_ret20"]
     else:
         q["gold_corr60"] = q["gold_tail20"] = np.nan
+    # 仮説(2026-11-25 担当1 100周目)：恐怖への感応度（VIX の前日の1日変化との60日相関。マイナス=不安が強まると売られる銘柄）と
+    # 恐怖の向かい風＝感応度×VIXの5日変化（マイナス=不安の高まりで売られた分）。不安で売られた分は不安が引けば戻るか。VIX は1日ずらし済み
+    if {"vix_chg1", "vix_chg5"} <= set(q.columns):
+        ok = x1.notna() & q["vix_chg1"].notna()
+        xa, fa = x1.where(ok), q["vix_chg1"].where(ok)
+        cxy = _roll(xa * fa) - _roll(xa) * _roll(fa)
+        sx = (_roll(xa * xa) - _roll(xa) ** 2).clip(lower=0) ** 0.5
+        sf = (_roll(fa * fa) - _roll(fa) ** 2).clip(lower=0) ** 0.5
+        q["vix_corr60"] = cxy / (sx * sf).replace(0, np.nan)
+        q["vix_tail5"] = q["vix_corr60"] * q["vix_chg5"]
+    else:
+        q["vix_corr60"] = q["vix_tail5"] = np.nan
     # 仮説(2026-11-22 53回目2周目 担当1)：金利感応度（日本10年金利の前日の変化との60日相関）と金利の追い風＝感応度×10年金利の20日変化
     if "jgb10y_chg1" in q.columns:
         ok = x1.notna() & q["jgb10y_chg1"].notna()
@@ -1686,6 +1718,10 @@ GRID = {
     "illiq_asym20": [(">=", 2.0), (">=", 1.3), ("<=", 0.8)],
     "hit10_rate": [(">=", 0.5), (">=", 0.35), ("<=", 0.15)],
     "sec_illiq_chg": [(">=", 1.3), (">=", 1.1), ("<=", 0.9)],
+    # 仮説(2026-11-25 担当1 100周目)：恐怖への感応度・恐怖の向かい風・決算期末までの月数
+    "vix_corr60": [("<=", -0.3), ("<=", -0.15), (">=", 0.0)],
+    "vix_tail5": [("<=", -1.0), ("<=", -0.3), (">=", 0.3)],
+    "fye_months": [("<=", 1), ("<=", 3), (">=", 9)],
     # 仮説(2026-11-22 26回目)：ボラで割った下げの深さ・窓を開けて下げた日の日中の戻り・60日安値からの経過日数
     "z_drop20":  [("<=", -2.5), ("<=", -1.5), (">=", 0.0)],
     "gap_rec":   [(">=", 1.0), (">=", 0.5), ("<=", 0.0)],
@@ -1969,7 +2005,7 @@ LABEL = {
     "sales_yoy": "売上高の前年同期比(直近の決算)", "sec_wide": "急落が広がった業種の割合(市場全体)",
     "bounce5": "直近5日の安値からの戻り", "crash_speed": "下げの集中度(5日騰落/20日騰落)",
     "vol_climax": "出来高のクライマックス(当日/前60日の最大)",
-    "skew60": "日次騰落の歪度(60日)", "illiq20": "非流動性(|日次騰落|/売買代金億円, 20日平均)", "illiq_chg": "流動性の急変(Amihud非流動性の5日平均/60日平均)", "dn_tv_share20": "下げ日の売買代金の割合(20日)", "mkt_illiq_chg": "市場全体の流動性の急変(銘柄のAmihud5日/60日の中央値)", "illiq_chg_rel": "市場に対する流動性の急変(銘柄/市場の中央値)", "illiq1_chg": "判定日当日の値の飛び方(当日のAmihud/60日平均)", "illiq10_chg": "流動性の急変(Amihud非流動性の10日平均/60日平均)", "hit10_rate": "跳ねやすさの実績(過去の日から20日以内に高値+10%に届いた割合・確定分のみ)", "sec_illiq_chg": "業種ぐるみの流動性の急変(業種内のAmihud5日/60日の中央値)", "illiq_asym20": "下げ日と上げ日の値の飛びやすさの比(Amihud、20日)",
+    "skew60": "日次騰落の歪度(60日)", "illiq20": "非流動性(|日次騰落|/売買代金億円, 20日平均)", "illiq_chg": "流動性の急変(Amihud非流動性の5日平均/60日平均)", "dn_tv_share20": "下げ日の売買代金の割合(20日)", "mkt_illiq_chg": "市場全体の流動性の急変(銘柄のAmihud5日/60日の中央値)", "illiq_chg_rel": "市場に対する流動性の急変(銘柄/市場の中央値)", "illiq1_chg": "判定日当日の値の飛び方(当日のAmihud/60日平均)", "illiq10_chg": "流動性の急変(Amihud非流動性の10日平均/60日平均)", "hit10_rate": "跳ねやすさの実績(過去の日から20日以内に高値+10%に届いた割合・確定分のみ)", "vix_corr60": "VIXの1日変化との相関(60日)", "vix_tail5": "恐怖の向かい風(VIX相関×VIX5日変化)", "fye_months": "決算期末までの月数", "sec_illiq_chg": "業種ぐるみの流動性の急変(業種内のAmihud5日/60日の中央値)", "illiq_asym20": "下げ日と上げ日の値の飛びやすさの比(Amihud、20日)",
     "xs_skew5": "市場全体の5日騰落の歪度(全銘柄)",
     "z_drop20": "ボラで割った20日騰落(20日騰落/(60日ボラ×√20))", "gap_rec": "窓を開けて下げた日の日中の戻り(窓≤-2%)",
     "lo_days60": "60日安値からの経過日数",
@@ -2050,7 +2086,7 @@ def fmt_cond(f, op, th):
         return "製造業" if op == ">=" else "非製造業"
     if f == "is_def":
         return "ディフェンシブ業種" if op == ">=" else "ディフェンシブ業種以外"
-    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "us_rv_ratio", "lim_dn20", "lim_up20", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5", "sec_gap_frac", "sec_crash_hit", "bd_left", "up_vol5", "sec_cap_age", "sec_cap_days10", "mg_ratio", "mg_long_d", "nk_beta", "nk_beta120", "fomc_next", "fomc_prev", "boj_next", "boj_prev", "mkt_tv_rel", "dn_vol_dry"):
+    if f in ("sec_vratio", "mkt_vratio", "vratio", "rsi14", "clpos", "vdry", "pbr", "vol_exp", "vix_rel60", "sec_crash_pk", "vix_pk20", "sec_wide", "hammer5", "ac20", "px_lvl", "clpos5", "sec_corr60", "sec_tv_rank", "sec_up_frac", "tv5_60", "rng5_20", "us_corr60", "sec_above25", "mkt_above25", "lo_cnt20", "sec_mcap_rank", "oil_corr60", "ret20_xr", "rsi2", "rsi_div", "sec_rsi2", "ret1_z", "sec_lo60_frac", "sec_rank5", "prior_crash", "eff20", "sec_lo60_off", "mkt_rv_exp", "mkt_rv_off", "mkt_speed", "sales_yld", "mkt_dn_tv", "mkt_dn_tv5", "disc_season", "fx_tail20", "rate_corr60", "rate_tail20", "fx_tail5", "oil_tail20", "sec_fx_tail20", "fx_tail_rel", "us_tail20", "sec_us_tail20", "riskoff5", "riskoff_off", "us_rv_ratio", "lim_dn20", "lim_up20", "vix_corr60", "vix_tail5", "fye_months", "gold_corr60", "gold_tail20", "beta_up60", "beta_dn60", "beta_asym", "vix_rv_gap", "pbr_cross1", "pbr_vs1", "split60", "split120", "rsplit120", "big_dn20", "big_dn_share", "ovh10", "ovh_all", "gap_cnt", "mkt_gap_frac", "sup5", "sec_gap_frac", "sec_crash_hit", "bd_left", "up_vol5", "sec_cap_age", "sec_cap_days10", "mg_ratio", "mg_long_d", "nk_beta", "nk_beta120", "fomc_next", "fomc_prev", "boj_next", "boj_prev", "mkt_tv_rel", "dn_vol_dry"):
         return f"{lab} {op} {th:g}"
     return f"{lab} {op} {th*100:+g}%"
 
