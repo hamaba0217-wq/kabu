@@ -3002,9 +3002,12 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
             sw_, sn_ = gdw["sum"].to_numpy(float), gdw["size"].to_numpy(float)
             ix_ = rs_.integers(0, len(gdw), (500, len(gdw)))
             b5 = float(np.percentile(sw_[ix_].sum(1) / sn_[ix_].sum(1), 5))
+        # 担当2 110周目：信号日の数・信号日を等しく数えた勝率・最多の1日が占める割合（件数の多い当たり日への依存。情報用）
+        _dm = gdw["sum"] / gdw["size"]
         srows.append((tt["win"].mean(), len(tt), tt["pnl"].mean(), wk.size, wk.iloc[:3].sum() / len(tt), epn,
                       " かつ ".join(fmt_cond(*c) for c in cs), qw["mean"].mean(), len(qw),
-                      (qw5["mean"].min() if len(qw5) else None), b5, spt_, why_))
+                      (qw5["mean"].min() if len(qw5) else None), b5, spt_, why_,
+                      len(gdw), float(_dm.mean()), float(gdw["size"].max() / len(tt))))
         _is = pd.to_datetime(tt["date"]) >= QUICK_FROM
         oos_rows.append((float(tt["win"].mean()), len(tt), int((~_is).sum()),
                          float(tt.loc[~_is, "win"].mean()) if (~_is).any() else None, int(_is.sum()),
@@ -3013,11 +3016,12 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
         srows.sort(key=lambda x: -x[0])
         md += ["", f"## seeds の局面集中（取引30件以上の {len(srows)} 個、勝率の高い順）", "",
                "（四半期の勝率＝取引のあった四半期を1つずつ等しく数えた勝率、最悪の四半期＝取引5件以上の四半期で最も低い勝率、"
-               "信号日単位5%点＝信号日を単位にしたブートストラップ500回の勝率の5%点）", "",
-               "| 勝率 | 取引数 | 平均損益 | 週数 | 上位3週の割合 | 局面の数 | 四半期の勝率 | 四半期数 | 最悪の四半期 | 信号日単位5%点 | 条件 | 各期間(取引数:勝率) | 採用されない理由 |",
-               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-        md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {pct(qm)} | {qn} | {pct(qmin)} | {pct(b5)} | {lbl} | {spt} | {why} |"
-               for w, n, p, wkn, t3, e, lbl, qm, qn, qmin, b5, spt, why in srows]
+               "信号日単位5%点＝信号日を単位にしたブートストラップ500回の勝率の5%点、"
+               "信号日均等の勝率＝信号日ごとの勝率を等しく数えた平均、最多の1日の割合＝取引が最も多い信号日が全取引に占める割合）", "",
+               "| 勝率 | 取引数 | 平均損益 | 週数 | 上位3週の割合 | 局面の数 | 四半期の勝率 | 四半期数 | 最悪の四半期 | 信号日単位5%点 | 条件 | 各期間(取引数:勝率) | 採用されない理由 | 信号日数 | 信号日均等の勝率 | 最多の1日の割合 |",
+               "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        md += [f"| {pct(w)} | {n} | {pct(p, 2)} | {wkn} | {t3*100:.0f}% | {e} | {pct(qm)} | {qn} | {pct(qmin)} | {pct(b5)} | {lbl} | {spt} | {why} | {nd} | {pct(dw)} | {d1*100:.0f}% |"
+               for w, n, p, wkn, t3, e, lbl, qm, qn, qmin, b5, spt, why, nd, dw, d1 in srows]
     try:
         _ct = dedup_trades(q, apply(q, conds))
         _ci = pd.to_datetime(_ct["date"]) >= QUICK_FROM
