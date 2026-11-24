@@ -2120,6 +2120,58 @@ def _code4(c):
     return c[:4] if len(c) == 5 and c.endswith("0") else c
 
 
+def overseas_panel():
+    """海外市場（FRED・財務省。PCで取った保存版 macro_snapshot.csv でも補う）の直近の値と前日比。情報として出すだけ"""
+    from html import escape
+    try:
+        import macro
+        m = macro.load()
+    except Exception as e:
+        return f"<div class='stat'>海外市場のデータを読めませんでした（{escape(str(e))[:80]}）。</div>", []
+    if m is None or len(m) == 0:
+        return "<div class='stat'>海外市場のデータがありません。</div>", []
+    items = [("sp500", "S&P500", "pct"), ("nasdaq", "NASDAQ", "pct"), ("vix", "VIX（米国株の不安指数）", "lvl"),
+             ("usdjpy", "ドル円", "pct"), ("us10y", "米10年金利", "bp"), ("wti", "原油(WTI)", "pct")]
+    cells, warn = [], []
+    for col, name, kind in items:
+        if col not in m.columns:
+            continue
+        s = m[col].dropna()
+        if len(s) < 2:
+            continue
+        v, p, d = float(s.iloc[-1]), float(s.iloc[-2]), s.index[-1]
+        if kind == "pct":
+            ch = v / p - 1
+            chs = f"{ch*100:+.1f}%"
+        elif kind == "bp":
+            ch = v - p
+            chs = f"{ch*100:+.0f}bp"
+        else:
+            ch = v - p
+            chs = f"{ch:+.1f}"
+        cls = "up" if ch > 0 else ("dn" if ch < 0 else "")
+        cells.append(f"<td>{escape(name)}</td><td>{v:,.2f}</td><td class='{cls}'>{chs}</td><td>{pd.Timestamp(d).date()}</td>")
+        if col in ("sp500", "nasdaq") and ch <= -0.02:
+            warn.append(f"{name}が前日比{chs}と大きく下げています")
+        if col == "vix" and (v >= 25 or ch >= 3):
+            warn.append(f"VIXが{v:.1f}（前日比{chs}）と高く、海外の不安が強い状態です")
+        if col == "usdjpy" and abs(ch) >= 0.01:
+            warn.append(f"ドル円が前日比{chs}と大きく動いています")
+    html = ("<div class='tablewrap'><table><thead><tr><th>海外市場</th><th>直近の値</th><th>前日比</th><th>日付(現地)</th></tr></thead>"
+            f"<tbody>{''.join('<tr>'+c+'</tr>' for c in cells)}</tbody></table></div>")
+    return html, warn
+
+
+def _chart(q, code, close):
+    try:
+        from web_report import _candles_svg
+        d = q.loc[q["code"] == code, ["date", "open", "high", "low", "close"] +
+                  (["volume"] if "volume" in q.columns else [])]
+        return _candles_svg(d, buy=close, tp=close * 1.10, sl=None, months=6)
+    except Exception as e:
+        return f"<div class='chart-none'>チャートを作れませんでした（{e}）</div>"
+
+
 def top_signals_html(state, q, last_date):
     """採用ルールに直近データ日で当てはまる銘柄の欄（トップページ用）。情報として出すだけ"""
     from html import escape
@@ -2133,13 +2185,52 @@ def top_signals_html(state, q, last_date):
             names = dict(zip(lst["code"].astype(str), lst["company_name"].astype(str)))
     except Exception:
         pass
-    head = (f"<h2>🎯 勝率がいちばん高いルールに当てはまる銘柄（データ日 {last_date.date()}）</h2>"
-            f"<div class='card strong'><div class='stat'>研究で見つけた現在のルール：過去5年の勝率 <b>{pct(champ['win'])}</b>"
-            f"（取引数 {champ['n']}、平均損益 {pct(champ['pnl'],2)}。条件なしの勝率は {pct(state.get('baseline', {}).get('win'))}）。"
-            f"売買方法は、データ日の<b>翌営業日の始値</b>で買い、買値の<b>+10%に売りの指値</b>、"
-            f"{HOLD}営業日以内に届かなければ{HOLD}営業日目の終値で売る。"
-            f"条件と点検結果は <a href='rules.html'>🎯 勝率改善ルール</a> へ。"
-            f"<br>更新 {state['updated']}（毎時自動）</div>")
+    basewin = state.get("baseline", {}).get("win")
+    head = (f"<h2>🏆 勝率の高い順 上位10銘柄（データ日 {last_date.date()}）</h2>"
+            f"<div class='card strong'><div class='stat'>研究で調べたルール（5年分で取引数{MIN_N}以上・3期間とも平均損益プラスのもの）の中から、"
+            f"各銘柄が当てはまるルールのうち<b>過去の勝率が最も高いもの</b>を選び、その勝率の高い順に並べています。"
+            f"勝ち＝<b>翌営業日の始値</b>で買い、{HOLD}営業日以内に<b>+10%</b>に届くこと（届かなければ{HOLD}営業日目の終値で売る）。"
+            f"条件なしの勝率は {pct(basewin)}。海外市場（米国株・VIX・金利・為替・原油）の状態を条件に含むルールも対象です。"
+            f"<br>更新 {dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime('%Y-%m-%d %H:%M')}"
+            f"（平日の朝8時・16時に自動更新）</div>")
+    panel, warn = overseas_panel()
+    head += "<h3>🌎 海外市場の状況（日本の朝の時点で分かっている直近の終値）</h3>" + panel
+    if warn:
+        head += ("<div class='card'><div class='stat'><b>⚠ 注意</b>：" + "。".join(escape(w) for w in warn) +
+                 "。下の勝率は過去の平均で、このような日は翌朝の始値が大きく動くことがあります。</div></div>")
+    ranked = []
+    try:
+        ranked = top_ranked(state, q, last_date)
+    except Exception as e:
+        print("上位10銘柄の計算に失敗:", e)
+    if ranked:
+        rows = "".join(
+            f"<tr><td>{i}</td><td>{escape(names.get(str(row['code']), ''))}</td><td>{escape(_code4(row['code']))}</td>"
+            f"<td>{escape(str(row['sector']))}</td><td data-v='{row['close']}'>{row['close']:,.0f}</td>"
+            f"<td data-v='{row['ret1']}'>{pct(row['ret1'])}</td>"
+            f"<td data-v='{r['win']}'><b>{pct(r['win'])}</b></td><td data-v='{r['n']}'>{r['n']}</td>"
+            f"<td data-v='{r['pnl']}'>{pct(r['pnl'],2)}</td>"
+            f"<td style='font-size:0.85em;text-align:left'>{escape('／'.join(fmt_cond(*c) for c in r['conds']))}</td></tr>"
+            for i, (r, row) in enumerate(ranked, 1))
+        head += ("<div class='tablewrap'><table><thead><tr><th>順位</th><th>銘柄名</th><th>コード</th><th>業種</th><th>終値</th>"
+                 "<th>前日比</th><th>過去の勝率</th><th>取引数</th><th>平均損益</th><th>当てはまったルール</th></tr></thead>"
+                 f"<tbody>{rows}</tbody></table></div>")
+        head += ("<p class='legend'><span class='up'>■</span> 陽線　<span class='dn'>■</span> 陰線　／ 点線："
+                 "<span style='color:#5f6368'>直近の終値（買値の目安。実際は翌営業日の始値）</span>・"
+                 "<span style='color:#137333'>+10%（勝ちの水準）</span>　／ 下段＝出来高・直近6か月</p>")
+        cards = "".join(
+            "<div class='chart-card'>"
+            f"<div class='ttl'>{i}位 {escape(names.get(str(row['code']), ''))} <span style='color:#999'>({escape(_code4(row['code']))})</span>"
+            f"<span class='res'><span class='badge-main'>過去の勝率 {pct(r['win'])}</span></span></div>"
+            f"<div class='sub'>{escape(str(row['sector']))}｜取引数 {r['n']}・平均損益 {pct(r['pnl'],2)}｜前日比 {pct(row['ret1'])}・20日騰落 {pct(row['ret20'])}</div>"
+            f"<div class='px'><b>終値 {row['close']:,.0f}円</b>　<span class='tp'>+10% {row['close']*1.1:,.0f}円</span></div>"
+            f"{_chart(q, row['code'], float(row['close']))}</div>"
+            for i, (r, row) in enumerate(ranked, 1))
+        head += f"<div class='pick-list'>{cards}</div>"
+    else:
+        head += "<div class='stat'>今日は条件なしより勝率の高いルールに当てはまる銘柄がありませんでした。</div>"
+    head += (f"<h3>🎯 勝率がいちばん高いルール（過去5年の勝率 {pct(champ['win'])}・取引数 {champ['n']}）に当てはまる銘柄</h3>"
+             f"<div class='stat'>条件と点検結果は <a href='rules.html'>🎯 勝率改善ルール</a> へ。</div>")
     if len(allsig):
         rows = "".join(
             f"<tr><td>{escape(names.get(str(r.code), ''))}</td><td>{escape(_code4(r.code))}</td><td>{escape(str(r.sector))}</td>"
@@ -2190,6 +2281,80 @@ def write_top_signals(state, q, last_date):
     open(INDEX_HTML, "w", encoding="utf-8").write(t)
 
 
+def _reliable(r):
+    """上位10銘柄の欄に使ってよいルールか（採用基準のうち、現ルールとの比較を除いた部分と同じ：
+    取引数150以上・3分割の各期間30以上・3期間すべてで平均損益プラス）。情報用で、採用判定 passes() は変えない"""
+    sp = r.get("splits") or []
+    return bool(r.get("n", 0) >= MIN_N and sp and all(s["n"] >= MIN_N_SPLIT and (s["pnl"] or 0) > 0 for s in sp))
+
+
+POOL_MAX = int(os.environ.get("RULE_LAB_POOL_MAX", "60"))
+
+
+def update_pool(state, q, edges, last_date):
+    """上位10銘柄の欄に使う複数条件のルール（採用履歴・現ルール・seeds）を5年分で評価して保存。データ日が変わったときだけ計算"""
+    if (state.get("pool") or {}).get("date") == str(last_date.date()):
+        return
+    pool, seen = [], set()
+    rules = [state["champion"]["conds"]] + [h["conds"] for h in state.get("history", [])]
+    try:
+        rules += [[list(c) for c in s.get("conds", [])] for s in
+                  json.load(open(os.path.join("rules", "seeds.json"), encoding="utf-8")).get("seeds", [])]
+    except Exception:
+        pass
+    today = q[q["date"] == last_date]
+    tested = state.get("tested") or {}
+    hits = []
+    for cs in rules:
+        k = rule_key(cs)
+        if not cs or k in seen:
+            continue
+        seen.add(k)
+        if apply(today, cs).any():   # 直近データ日に当てはまる銘柄が無いルールは並べ替えに使わないので計算を省く
+            hits.append(cs)
+    # 計算時間を抑えるため、重複除去前の取引数が基準以上のものを、重複除去前の勝率が高い順に最大 POOL_MAX 個だけ評価する
+    valid = q["win"].notna()
+    pre = []
+    for cs in hits:
+        m = apply(q, cs) & valid
+        n0 = int(m.sum())
+        if n0 >= MIN_N:
+            pre.append((float(q.loc[m, "win"].mean()), cs))
+    pre.sort(key=lambda x: -x[0])
+    for _, cs in pre[:POOL_MAX]:
+        r = evaluate(q, cs, edges)
+        if r.get("n"):
+            pool.append({"conds": cs, "n": r["n"], "win": r["win"], "pnl": r["pnl"], "ok": _reliable(r)})
+    state["pool"] = {"date": str(last_date.date()), "rules": pool}
+
+
+def top_ranked(state, q, last_date, k=10):
+    """直近データ日の銘柄ごとに、当てはまる「信頼できるルール」のうち過去の勝率が最も高いものを選び、勝率の高い順に k 銘柄"""
+    today = q[q["date"] == last_date]
+    if today.empty:
+        return []
+    basewin = (state.get("baseline") or {}).get("win") or 0
+    rules = [r for r in (state.get("pool") or {}).get("rules", []) if r.get("ok")]
+    rules += [{"conds": [s["cond"]], "n": s["n"], "win": s["win"], "pnl": s["pnl"]}
+              for s in (state.get("singles") or []) if s.get("ok")]
+    rules = [r for r in rules if (r.get("win") or 0) > basewin]
+    rules.sort(key=lambda r: (-r["win"], -r["n"]))
+    best = {}
+    for r in rules:
+        codes = today.loc[apply(today, r["conds"]), "code"]
+        for c in codes:
+            if c not in best:
+                best[c] = r
+        if len(best) >= 300:
+            break
+    out = []
+    for c, r in best.items():
+        row = today[today["code"] == c].iloc[0]
+        out.append((r, row))
+    out.sort(key=lambda x: (-x[0]["win"], -x[0]["n"], -(x[1]["tv20"] if x[1]["tv20"] == x[1]["tv20"] else 0)))
+    return out[:k]
+
+
 def single_report(q, edges, base):
     """要因1つずつの成績（研究用）。基準（条件なし）との差を記録"""
     out = []
@@ -2201,7 +2366,7 @@ def single_report(q, edges, base):
             sp = [x["win"] for x in r["splits"] if x["win"] is not None]
             out.append({"cond": [f, op, th], "label": fmt_cond(f, op, th), "n": r["n"],
                         "win": r["win"], "pnl": r["pnl"], "lift": r["win"] - base["win"],
-                        "min_split_win": min(sp) if sp else None})
+                        "min_split_win": min(sp) if sp else None, "ok": _reliable(r)})
     out.sort(key=lambda x: -x["lift"])
     return out
 
@@ -2217,7 +2382,7 @@ def write_feature_report(state):
     open(os.path.join("rules", "feature_report.md"), "w", encoding="utf-8").write("\n".join(md))
 
 
-def write_outputs(state, q, last_date):
+def write_outputs(state, q, last_date, top=True):
     os.makedirs("rules", exist_ok=True)
     champ = state["champion"]
     hist = state["history"]
@@ -2293,7 +2458,8 @@ def write_outputs(state, q, last_date):
     html = _page("勝率改善ルール", "rules", body) if _page else f"<!doctype html><meta charset=utf-8><body>{body}"
     open(RULES_HTML, "w", encoding="utf-8").write(html)
     try:
-        write_top_signals(state, q, last_date)
+        if top:
+            write_top_signals(state, q, last_date)
     except Exception as e:
         print("トップページの欄の更新に失敗（ルールページは更新済み）:", e)
 
@@ -2958,6 +3124,7 @@ def main():
     ap.add_argument("--no-fetch", action="store_true")
     ap.add_argument("--push", action="store_true")
     ap.add_argument("--force-write", action="store_true")
+    ap.add_argument("--page-only", action="store_true", help="ルール探索はせず、ページ（トップの欄を含む）だけ作り直す")
     a = ap.parse_args()
 
     q = add_features(load_data(not a.no_fetch))
@@ -2984,7 +3151,7 @@ def main():
         os.makedirs("rules", exist_ok=True)
         write_feature_report(state)
         print(f"要因別レポート更新（{len(state['singles'])}条件）")
-    cands = candidates(champ["conds"], state["tested"])[:BATCH]
+    cands = [] if a.page_only else candidates(champ["conds"], state["tested"])[:BATCH]
     print(f"今回テスト: {len(cands)} ルール")
     improved = False
     for i, cs in enumerate(cands):
@@ -3001,15 +3168,22 @@ def main():
     state["updated"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     os.makedirs("rules", exist_ok=True)
     json.dump(state, open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=1, default=float)
-    try:   # 担当2の点検（情報用。採用判定には使わない）
+    try:   # 担当2の点検（情報用。採用判定には使わない）。ページだけ作り直すときは省く
+        if a.page_only:
+            raise RuntimeError("--page-only のため省略")
         robustness_report(q, champ["conds"], edges, base, singles=state.get("singles"))
         write_robust_html()
         print(f"{ROBUST_MD}・{ROBUST_HTML} を更新")
     except Exception as e:
         print("点検レポートの作成に失敗:", e)
-    if improved or a.force_write or not os.path.exists(RULES_HTML):
-        write_outputs(state, q, last_date)
-        print("rules/RULES.md・docs/rules.html を更新")
+    try:   # トップページの上位10銘柄に使うルールの成績（データ日が変わったときだけ計算）
+        update_pool(state, q, edges, last_date)
+        json.dump(state, open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=1, default=float)
+    except Exception as e:
+        print("上位10銘柄用のルール評価に失敗:", e)
+    # ルールページは毎回作り直す。トップページの欄は朝8時・16時の top_page.yml（--page-only）だけが更新する
+    write_outputs(state, q, last_date, top=a.page_only)
+    print("rules/RULES.md・docs/rules.html を更新" + ("・トップページの欄を更新" if a.page_only else ""))
     if a.push:
         if improved:
             git_push(f"ルール更新: 1か月+10%勝率 {pct(champ['win'])}（n={champ['n']}）")

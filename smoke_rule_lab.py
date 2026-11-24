@@ -41,6 +41,11 @@ for cs in cands[:30]:
     R.evaluate(q, cs, edges)
 st = {"champion": {"conds": [], **base}, "history": [], "tested": {}, "baseline": base,
       "updated": "test", "singles": R.single_report(q, edges, base)}
+st["history"] = [{"conds": [["ret20", "<=", -0.1]]}]
+R.update_pool(st, q, edges, q["date"].max())
+assert st["pool"]["rules"], "上位10銘柄用のルール評価が空"
+print("上位10:", [(r["win"], row["code"]) for r, row in R.top_ranked(st, q, q["date"].max())][:3])
+st["history"] = []
 R.write_outputs(st, q, q["date"].max())
 R.write_outputs(st, q, q["date"].max())   # 2回目は欄の差し替え（重複しないこと）
 _ix = open(R.INDEX_HTML, encoding="utf-8").read()

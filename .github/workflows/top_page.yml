@@ -1,0 +1,52 @@
+name: Top Page (今日の候補・朝8時と16時)
+# 利用者の指定：トップページ（今日の候補）は平日の朝8時と16時（日本時間）の2回だけ更新する。
+# 作り終わる時刻が8時・16時ごろになるよう、少し前（7:23・15:23）に始める。GitHub の定時実行は混雑で遅れることがある。
+on:
+  schedule:
+    - cron: '23 22 * * 0-4'   # 月〜金 7:23（日本時間）
+    - cron: '23 6 * * 1-5'    # 月〜金 15:23（日本時間）
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: top-page
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install yfinance jquants-api-client
+      - uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: rule-lab-data-${{ github.run_id }}
+          restore-keys: rule-lab-data-
+      - name: データ取得（差分）
+        run: python -u fetch_data.py
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          FETCH_MINUTES: '20'
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data
+          key: rule-lab-data-${{ github.run_id }}
+      - name: 今日の候補・実績ページ
+        run: python web_report.py
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          LIGHT_MODE: "1"
+      - name: 勝率の高い順 上位10銘柄・海外市場・チャート（トップページの欄）
+        run: python -u rule_lab.py --no-fetch --page-only
+      - uses: stefanzweifel/git-auto-commit-action@v6
+        with:
+          commit_message: "トップページ更新（今日の候補・上位10銘柄）"
+          branch: main

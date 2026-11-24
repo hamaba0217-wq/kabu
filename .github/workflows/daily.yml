@@ -1,7 +1,6 @@
 name: Daily Screening
 on:
-  schedule:
-    - cron: '0 10 * * 1-5'
+  # 定時の更新は top_page.yml（平日8時・16時）に移した。手動実行用に残す
   workflow_dispatch:
 jobs:
   build:
