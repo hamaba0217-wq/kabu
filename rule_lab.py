@@ -3011,7 +3011,8 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
         _is = pd.to_datetime(tt["date"]) >= QUICK_FROM
         oos_rows.append((float(tt["win"].mean()), len(tt), int((~_is).sum()),
                          float(tt.loc[~_is, "win"].mean()) if (~_is).any() else None, int(_is.sum()),
-                         float(tt.loc[_is, "win"].mean()) if _is.any() else None, " かつ ".join(fmt_cond(*c) for c in cs)))
+                         float(tt.loc[_is, "win"].mean()) if _is.any() else None, " かつ ".join(fmt_cond(*c) for c in cs),
+                         tuple(sorted({re.split(r" (?:>=|<=) ", fmt_cond(*c))[0] for c in cs}))))   # 担当3 73周目：条件別の集計用
     if srows:
         srows.sort(key=lambda x: -x[0])
         md += ["", f"## seeds の局面集中（取引30件以上の {len(srows)} 個、勝率の高い順）", "",
@@ -3036,7 +3037,19 @@ def robustness_report(q, conds, edges, base, path=None, singles=None):
                    "| 5年分の勝率 | 取引数 | 除いた期間の取引数 | 除いた期間の勝率 | 速報の期間の取引数 | 速報の期間の勝率 | 条件 |",
                    "|---|---|---|---|---|---|---|"]
             md += [f"| {pct(w)} | {n} | {no} | {pct(wo)} | {ni} | {pct(wi)} | {lbl} |"
-                   for w, n, no, wo, ni, wi, lbl in sorted(_ok, key=lambda x: -x[0])[:40]]
+                   for w, n, no, wo, ni, wi, lbl, *_ in sorted(_ok, key=lambda x: -x[0])[:40]]
+            # 担当3 73周目：条件（要因）ごとに、それを含む seeds の「速報の期間 − 除いた期間」の勝率差を集計（見つけた期間だけで効く要因の洗い出し）
+            _fd = {}
+            for r in _ok:
+                for f_ in r[7]:
+                    _fd.setdefault(f_, []).append(r[5] - r[3])
+            _fr = sorted(((np.median(v), f_, len(v), float(np.mean(np.array(v) > 0.05))) for f_, v in _fd.items() if len(v) >= 20), key=lambda x: -x[0])
+            if _fr:
+                md += ["", f"### 条件ごとの偏り（その条件を含む seeds が20個以上の {len(_fr)} 条件、差の中央値の大きい順）", "",
+                       "差＝速報の期間の勝率 − 除いた期間の勝率。大きいほど「手元の8か月だけで効いている」疑い。全体の中央値 "
+                       f"{np.median(_d) * 100:+.1f}pt と比べて読む。", "",
+                       "| 条件 | 含む seeds | 差の中央値 | 5pt以上低い割合 |", "|---|---|---|---|"]
+                md += [f"| {f_} | {k_} | {m_ * 100:+.1f}pt | {b_ * 100:.0f}% |" for m_, f_, k_, b_ in _fr]
     except Exception as e:
         md += ["", f"（速報の期間を除いた成績の集計は失敗：{e}）"]
     # 担当2が検証中の条件について、seeds からその条件を外した版との差（その条件の上乗せが5年分でもあるか）
