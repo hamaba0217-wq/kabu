@@ -26,7 +26,7 @@
 
 目的：「どうすれば1か月以内に+10%到達の勝率が上がるか」を研究し、新しい仮説を探索対象に加え続けること。
 
-1. `git pull` 後、次を読む：rules/research_log.md（過去の仮説と結果）、rules/feature_report.md（要因別の勝率と基準との差）、rules/RULES.md（現ルールと採用履歴）、rules/state.json の baseline / champion / updated。
+1. `git pull` 後、**PC（data/ がある環境）では毎周の最初に `py -X utf8 macro.py` を実行**して海外市場の値（FRED）を取り直し、macro_snapshot.csv が変わっていれば手順7で一緒にコミットする（Actions は FRED に繋がらないことが多く、トップページの海外市場の表と海外の要因はこの保存版に頼っている）。次を読む：rules/research_log.md（過去の仮説と結果）、rules/feature_report.md（要因別の勝率と基準との差）、rules/RULES.md（現ルールと採用履歴）、rules/state.json の baseline / champion / updated。
    - state.json が無い・古い（データ取得中）なら、結果がまだ無い旨を研究ログに1行書くだけでもよい。
 2. 結果を解釈する：効いている要因・効いていない要因、期間で不安定な要因、過去の仮説の検証結果（research_log の「結果待ち」を feature_report と照合して結果を書き込む）。
 3. **新しい仮説を1〜3個**考える。例：新しい要因（決算の増益率・会社予想の修正、信用残、業種のローテーション、指数との相関、連続陽線、出来高の枯れ、年初来高値更新、祝日前後、為替感応度など）、既存要因の閾値の追加、要因同士の組み合わせ。
